@@ -5,7 +5,7 @@ use {Future, Wake, PollResult, Tokens};
 use executor::{DEFAULT, Executor};
 use slot::Slot;
 
-type Thunk = Box<Future<Item=(), Error=()>>;
+type Thunk = Box<Future<(), ()>>;
 
 struct Forget {
     slot: Slot<(Thunk, Arc<Forget>)>,
@@ -13,7 +13,11 @@ struct Forget {
     tokens: AtomicUsize,
 }
 
-pub fn forget<T: Future>(mut t: T) {
+pub fn forget<A, T, E>(mut t: A)
+    where A: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
     if t.poll(&Tokens::all()).is_some() {
         return
     }
@@ -28,14 +32,17 @@ pub fn forget<T: Future>(mut t: T) {
 
 // FIXME(rust-lang/rust#34416) should just be able to use map/map_err, but that
 //                             causes trans to go haywire.
-struct ThunkFuture<T, E> {
-    inner: Box<Future<Item=T, Error=E>>,
+struct ThunkFuture<T, E>
+    where T: Send + 'static,
+          E: Send + 'static,
+{
+    inner: Box<Future<T, E>>,
 }
 
-impl<T: Send + 'static, E: Send + 'static> Future for ThunkFuture<T, E> {
-    type Item = ();
-    type Error = ();
-
+impl<T, E> Future<(), ()> for ThunkFuture<T, E>
+    where T: Send + 'static,
+          E: Send + 'static,
+{
     fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<(), ()>> {
         match self.inner.poll(tokens) {
             Some(Ok(_)) => Some(Ok(())),
@@ -48,7 +55,7 @@ impl<T: Send + 'static, E: Send + 'static> Future for ThunkFuture<T, E> {
         self.inner.schedule(wake)
     }
 
-    fn tailcall(&mut self) -> Option<Box<Future<Item=(), Error=()>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<(), ()>>> {
         if let Some(f) = self.inner.tailcall() {
             self.inner = f;
         }

@@ -132,10 +132,7 @@ impl<T, E> Drop for Complete<T, E>
 
 struct Canceled;
 
-impl<T: Send + 'static, E: Send + 'static> Future for Promise<T, E> {
-    type Item = T;
-    type Error = E;
-
+impl<T: Send + 'static, E: Send + 'static> Future<T, E> for Promise<T, E> {
     fn poll(&mut self, _: &Tokens) -> Option<PollResult<T, E>> {
         if self.inner.pending_wake.load(Ordering::SeqCst) {
             return None
@@ -171,7 +168,7 @@ impl<T: Send + 'static, E: Send + 'static> Future for Promise<T, E> {
         tokens
     }
 
-    fn tailcall(&mut self) -> Option<Box<Future<Item=T, Error=E>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<T, E>>> {
         None
     }
 }

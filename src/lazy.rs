@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::marker;
 use std::mem;
 use std::sync::Arc;
 
@@ -9,17 +10,22 @@ use util;
 /// scheduled.
 ///
 /// This is created by the `lazy` function.
-pub struct Lazy<F, R> {
-    inner: _Lazy<F, R>,
+pub struct Lazy<F, A, T, E>
+    where A: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
+    inner: _Lazy<F, A>,
     // TODO: the handling of a panicked closure here is pretty bad, should
     //       refactor this or just delete this future, seems to have very little
     //       reason to exist any more.
     deferred_error: Option<Box<Any+Send>>,
+    _marker: marker::PhantomData<fn() -> (T, E)>,
 }
 
-enum _Lazy<F, R> {
+enum _Lazy<F, A> {
     First(F),
-    Second(R),
+    Second(A),
     Moved,
 }
 
@@ -42,21 +48,26 @@ enum _Lazy<F, R> {
 /// });
 /// drop(b); // closure is never run
 /// ```
-pub fn lazy<F, R>(f: F) -> Lazy<F, R::Future>
-    where F: FnOnce() -> R + Send + 'static,
-          R: IntoFuture
+pub fn lazy<F, A, T, E>(f: F) -> Lazy<F, A::Future, T, E>
+    where F: FnOnce() -> A + Send + 'static,
+          A: IntoFuture<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
 {
     Lazy {
         inner: _Lazy::First(f),
         deferred_error: None,
+        _marker: marker::PhantomData,
     }
 }
 
-impl<F, R> Lazy<F, R::Future>
-    where F: FnOnce() -> R + Send + 'static,
-          R: IntoFuture,
+impl<F, A, T, E> Lazy<F, A::Future, T, E>
+    where F: FnOnce() -> A + Send + 'static,
+          A: IntoFuture<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
 {
-    fn get<E>(&mut self) -> PollResult<&mut R::Future, E> {
+    fn get<G>(&mut self) -> PollResult<&mut A::Future, G> {
         match self.inner {
             _Lazy::First(_) => {}
             _Lazy::Second(ref mut f) => return Ok(f),
@@ -74,14 +85,13 @@ impl<F, R> Lazy<F, R::Future>
     }
 }
 
-impl<F, R> Future for Lazy<F, R::Future>
-    where F: FnOnce() -> R + Send + 'static,
-          R: IntoFuture,
+impl<F, A, T, E> Future<T, E> for Lazy<F, A::Future, T, E>
+    where F: FnOnce() -> A + Send + 'static,
+          A: IntoFuture<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
 {
-    type Item = R::Item;
-    type Error = R::Error;
-
-    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<R::Item, R::Error>> {
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<T, E>> {
         if let Some(e) = self.deferred_error.take() {
             return Some(Err(PollError::Panicked(e)))
         }
@@ -107,7 +117,7 @@ impl<F, R> Future for Lazy<F, R::Future>
         util::done(wake)
     }
 
-    fn tailcall(&mut self) -> Option<Box<Future<Item=R::Item, Error=R::Error>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<T, E>>> {
         if self.deferred_error.is_some() {
             return None
         }

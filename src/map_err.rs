@@ -6,13 +6,21 @@ use util::{self, Collapsed};
 /// Future for the `map_err` combinator, changing the error type of a future.
 ///
 /// This is created by this `Future::map_err` method.
-pub struct MapErr<A, F> where A: Future {
-    future: Collapsed<A>,
+pub struct MapErr<A, F, T, E>
+    where A: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
+    future: Collapsed<A, T, E>,
     f: Option<F>,
 }
 
-pub fn new<A, F>(future: A, f: F) -> MapErr<A, F>
-    where A: Future
+pub fn new<U, A, F, T, E>(future: A, f: F) -> MapErr<A, F, T, E>
+    where A: Future<T, E>,
+          F: FnOnce(E) -> U + Send + 'static,
+          U: Send + 'static,
+          T: Send + 'static,
+          E: Send + 'static,
 {
     MapErr {
         future: Collapsed::Start(future),
@@ -20,15 +28,14 @@ pub fn new<A, F>(future: A, f: F) -> MapErr<A, F>
     }
 }
 
-impl<U, A, F> Future for MapErr<A, F>
-    where A: Future,
-          F: FnOnce(A::Error) -> U + Send + 'static,
+impl<U, A, F, T, E> Future<T, U> for MapErr<A, F, T, E>
+    where A: Future<T, E>,
+          F: FnOnce(E) -> U + Send + 'static,
           U: Send + 'static,
+          T: Send + 'static,
+          E: Send + 'static,
 {
-    type Item = A::Item;
-    type Error = U;
-
-    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<A::Item, U>> {
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<T, U>> {
         let result = match self.future.poll(tokens) {
             Some(result) => result,
             None => return None,
@@ -43,8 +50,7 @@ impl<U, A, F> Future for MapErr<A, F>
         self.future.schedule(wake)
     }
 
-    fn tailcall(&mut self)
-                -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<T, U>>> {
         self.future.collapse();
         None
     }

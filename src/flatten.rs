@@ -7,29 +7,34 @@ use chain::Chain;
 /// the result of the final future.
 ///
 /// This is created by this `Future::flatten` method.
-pub struct Flatten<A> where A: Future, A::Item: IntoFuture {
-    state: Chain<A, <A::Item as IntoFuture>::Future, ()>,
+pub struct Flatten<A, T, E, U>
+    where A: Future<T, E>,
+          T: IntoFuture<U, E>,
+          E: Send + 'static,
+          U: Send + 'static,
+{
+
+    state: Chain<A, T::Future, (), T, E, U, E>,
 }
 
-pub fn new<A>(future: A) -> Flatten<A>
-    where A: Future,
-          A::Item: IntoFuture,
+pub fn new<A, T, E, U>(future: A) -> Flatten<A, T, E, U>
+    where A: Future<T, E>,
+          T: IntoFuture<U, E>,
+          E: Send + 'static,
+          U: Send + 'static,
 {
     Flatten {
         state: Chain::new(future, ()),
     }
 }
 
-impl<A> Future for Flatten<A>
-    where A: Future,
-          A::Item: IntoFuture,
-          <<A as Future>::Item as IntoFuture>::Error: From<<A as Future>::Error>
+impl<A, T, E, U> Future<U, E> for Flatten<A, T, E, U>
+    where A: Future<T, E>,
+          T: IntoFuture<U, E>,
+          E: Send + 'static,
+          U: Send + 'static,
 {
-    type Item = <<A as Future>::Item as IntoFuture>::Item;
-    type Error = <<A as Future>::Item as IntoFuture>::Error;
-
-    fn poll(&mut self, tokens: &Tokens)
-            -> Option<PollResult<Self::Item, Self::Error>> {
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<U, E>> {
         self.state.poll(tokens, |a, ()| {
             match a {
                 Ok(item) => Ok(Err(item.into_future())),
@@ -42,8 +47,7 @@ impl<A> Future for Flatten<A>
         self.state.schedule(wake)
     }
 
-    fn tailcall(&mut self)
-                -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<U, E>>> {
         self.state.tailcall()
     }
 }

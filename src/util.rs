@@ -4,9 +4,12 @@ use std::sync::Arc;
 use {PollResult, PollError, Wake, Future, Tokens};
 use executor::{Executor, DEFAULT};
 
-pub enum Collapsed<T: Future> {
-    Start(T),
-    Tail(Box<Future<Item=T::Item, Error=T::Error>>),
+pub enum Collapsed<A, T, E>
+    where T: Send + 'static,
+          E: Send + 'static,
+{
+    Start(A),
+    Tail(Box<Future<T, E>>),
 }
 
 // TODO: reexport this?
@@ -42,8 +45,12 @@ pub fn opt2poll<T, E>(t: Option<T>) -> PollResult<T, E> {
     }
 }
 
-impl<T: Future> Collapsed<T> {
-    pub fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<T::Item, T::Error>> {
+impl<A, T, E> Collapsed<A, T, E>
+    where A: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
+    pub fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<T, E>> {
         match *self {
             Collapsed::Start(ref mut a) => a.poll(tokens),
             Collapsed::Tail(ref mut a) => a.poll(tokens),

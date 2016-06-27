@@ -7,9 +7,12 @@ use util;
 /// A future representing a finished successful computation.
 ///
 /// Created by the `finished` function.
-pub struct Finished<T, E> {
+pub struct Finished<T, E>
+    where T: Send + 'static,
+          E: Send + 'static,
+{
     t: Option<T>,
-    _e: marker::PhantomData<E>,
+    _e: marker::PhantomData<fn() -> E>,
 }
 
 /// Creates a "leaf future" from an immediate value of a finished and
@@ -32,14 +35,10 @@ pub fn finished<T, E>(t: T) -> Finished<T, E>
     Finished { t: Some(t), _e: marker::PhantomData }
 }
 
-impl<T, E> Future for Finished<T, E>
+impl<T, E> Future<T, E> for Finished<T, E>
     where T: Send + 'static,
           E: Send + 'static,
 {
-    type Item = T;
-    type Error = E;
-
-
     fn poll(&mut self, _: &Tokens) -> Option<PollResult<T, E>> {
         Some(util::opt2poll(self.t.take()))
     }
@@ -48,7 +47,7 @@ impl<T, E> Future for Finished<T, E>
         util::done(wake)
     }
 
-    fn tailcall(&mut self) -> Option<Box<Future<Item=T, Error=E>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<T, E>>> {
         None
     }
 }

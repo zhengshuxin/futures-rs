@@ -31,13 +31,10 @@ pub fn done<T, E>(r: Result<T, E>) -> Done<T, E>
     Done { inner: Some(r) }
 }
 
-impl<T, E> Future for Done<T, E>
+impl<T, E> Future<T, E> for Done<T, E>
     where T: Send + 'static,
           E: Send + 'static,
 {
-    type Item = T;
-    type Error = E;
-
     fn poll(&mut self, _tokens: &Tokens) -> Option<PollResult<T, E>> {
         Some(util::opt2poll(self.inner.take()).and_then(|r| {
             r.map_err(PollError::Other)
@@ -48,7 +45,7 @@ impl<T, E> Future for Done<T, E>
         util::done(wake)
     }
 
-    fn tailcall(&mut self) -> Option<Box<Future<Item=T, Error=E>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<T, E>>> {
         None
     }
 }

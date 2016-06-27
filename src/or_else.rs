@@ -8,30 +8,38 @@ use util;
 /// a future which fails with an error.
 ///
 /// This is created by this `Future::or_else` method.
-pub struct OrElse<A, B, F> where A: Future, B: IntoFuture {
-    state: Chain<A, B::Future, F>,
+pub struct OrElse<A, B, F, T, E, U>
+    where A: Future<T, E>,
+          B: IntoFuture<T, U>,
+          T: Send + 'static,
+          E: Send + 'static,
+          U: Send + 'static,
+{
+    state: Chain<A, B::Future, F, T, E, T, U>,
 }
 
-pub fn new<A, B, F>(future: A, f: F) -> OrElse<A, B, F>
-    where A: Future,
-          B: IntoFuture<Item=A::Item>,
-          F: Send + 'static,
+pub fn new<A, B, F, T, E, U>(future: A, f: F) -> OrElse<A, B, F, T, E, U>
+    where A: Future<T, E>,
+          B: IntoFuture<T, U>,
+          F: FnOnce(E) -> B + Send + 'static,
+          T: Send + 'static,
+          E: Send + 'static,
+          U: Send + 'static,
 {
     OrElse {
         state: Chain::new(future, f),
     }
 }
 
-impl<A, B, F> Future for OrElse<A, B, F>
-    where A: Future,
-          B: IntoFuture<Item=A::Item>,
-          F: FnOnce(A::Error) -> B + Send + 'static,
+impl<A, B, F, T, E, U> Future<T, U> for OrElse<A, B, F, T, E, U>
+    where A: Future<T, E>,
+          B: IntoFuture<T, U>,
+          F: FnOnce(E) -> B + Send + 'static,
+          T: Send + 'static,
+          E: Send + 'static,
+          U: Send + 'static,
 {
-    type Item = B::Item;
-    type Error = B::Error;
-
-    fn poll(&mut self, tokens: &Tokens)
-            -> Option<PollResult<B::Item, B::Error>> {
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<T, U>> {
         self.state.poll(tokens, |a, f| {
             match a {
                 Ok(item) => Ok(Ok(item)),
@@ -47,8 +55,7 @@ impl<A, B, F> Future for OrElse<A, B, F>
         self.state.schedule(wake)
     }
 
-    fn tailcall(&mut self)
-                -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<T, U>>> {
         self.state.tailcall()
     }
 }

@@ -113,18 +113,7 @@ mod forget;
 /// zero-cost and don't impose any extra layers of indirection you wouldn't
 /// otherwise have to write down.
 // TODO: expand this
-pub trait Future: Send + 'static {
-
-    /// The type of value that this future will resolved with if it is
-    /// successful.
-    type Item: Send + 'static;
-
-    /// The type of error that this future will resolve with if it fails in a
-    /// normal fashion.
-    ///
-    /// Futures may also fail due to panics or cancellation, but that is
-    /// expressed through the `PollError` type, not this type.
-    type Error: Send + 'static;
+pub trait Future<T: Send + 'static, E: Send + 'static>: Send + 'static {
 
     /// Query this future to see if its value has become available.
     ///
@@ -164,8 +153,7 @@ pub trait Future: Send + 'static {
     /// First a future may fail legitimately (return a normal error), but it may
     /// also panic. Both of thse results are communicated through the `Err`
     /// portion of this result.
-    fn poll(&mut self, tokens: &Tokens)
-            -> Option<PollResult<Self::Item, Self::Error>>;
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<T, E>>;
 
     /// Register a callback to be run whenever this future can make progress
     /// again.
@@ -230,8 +218,7 @@ pub trait Future: Send + 'static {
     /// same value that this future *would* have been had this method not been
     /// called. Essentially, if `Some` is returned, then this future can be
     /// forgotten and instead the returned value is used.
-    fn tailcall(&mut self)
-                -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>>;
+    fn tailcall(&mut self) -> Option<Box<Future<T, E>>>;
 
     /// Convenience function for turning this future into a trait object.
     ///
@@ -245,9 +232,7 @@ pub trait Future: Send + 'static {
     ///
     /// let a: Box<Future<Item=i32, Error=i32>> = done(Ok(1)).boxed();
     /// ```
-    fn boxed(self) -> Box<Future<Item=Self::Item, Error=Self::Error>>
-        where Self: Sized
-    {
+    fn boxed(self) -> Box<Future<T, E>> where Self: Sized {
         Box::new(self)
     }
 
@@ -274,12 +259,12 @@ pub trait Future: Send + 'static {
     /// let future_of_1 = finished::<u32, u32>(1);
     /// let future_of_4 = future_of_1.map(|x| x + 3);
     /// ```
-    fn map<F, U>(self, f: F) -> Map<Self, F>
-        where F: FnOnce(Self::Item) -> U + Send + 'static,
+    fn map<F, U>(self, f: F) -> Map<Self, F, T, E>
+        where F: FnOnce(T) -> U + Send + 'static,
               U: Send + 'static,
               Self: Sized,
     {
-        assert_future::<U, Self::Error, _>(map::new(self, f))
+        assert_future::<U, E, _>(map::new(self, f))
     }
 
     /// Map this future's error to a different error, returning a new future.
@@ -304,12 +289,12 @@ pub trait Future: Send + 'static {
     /// let future_of_err_1 = failed::<u32, u32>(1);
     /// let future_of_err_4 = future_of_err_1.map_err(|x| x + 3);
     /// ```
-    fn map_err<F, E>(self, f: F) -> MapErr<Self, F>
-        where F: FnOnce(Self::Error) -> E + Send + 'static,
-              E: Send + 'static,
+    fn map_err<F, U>(self, f: F) -> MapErr<Self, F, T, E>
+        where F: FnOnce(E) -> U + Send + 'static,
+              U: Send + 'static,
               Self: Sized,
     {
-        assert_future::<Self::Item, E, _>(map_err::new(self, f))
+        assert_future::<T, U, _>(map_err::new(self, f))
     }
 
     /// Chain on a computation for when a future finished, passing the result of
@@ -349,12 +334,14 @@ pub trait Future: Send + 'static {
     ///     }
     /// });
     /// ```
-    fn then<F, B>(self, f: F) -> Then<Self, B, F>
-        where F: FnOnce(Result<Self::Item, Self::Error>) -> B + Send + 'static,
-              B: IntoFuture,
+    fn then<F, B, U, V>(self, f: F) -> Then<Self, B, F, T, E, U, V>
+        where F: FnOnce(Result<T, E>) -> B + Send + 'static,
+              B: IntoFuture<U, V>,
+              U: Send + 'static,
+              V: Send + 'static,
               Self: Sized,
     {
-        assert_future::<B::Item, B::Error, _>(then::new(self, f))
+        assert_future::<U, V, _>(then::new(self, f))
     }
 
     /// Execute another future after this one has resolved successfully.
@@ -389,12 +376,13 @@ pub trait Future: Send + 'static {
     ///     panic!("should not be called in case of an error");
     /// });
     /// ```
-    fn and_then<F, B>(self, f: F) -> AndThen<Self, B, F>
-        where F: FnOnce(Self::Item) -> B + Send + 'static,
-              B: IntoFuture<Error = Self::Error>,
+    fn and_then<F, B, U>(self, f: F) -> AndThen<Self, B, F, T, E, U>
+        where F: FnOnce(T) -> B + Send + 'static,
+              B: IntoFuture<U, E>,
+              U: Send + 'static,
               Self: Sized,
     {
-        assert_future::<B::Item, Self::Error, _>(and_then::new(self, f))
+        assert_future::<U, E, _>(and_then::new(self, f))
     }
 
     /// Execute another future after this one has resolved with an error.
@@ -429,12 +417,13 @@ pub trait Future: Send + 'static {
     ///     panic!("should not be called in case of success");
     /// });
     /// ```
-    fn or_else<F, B>(self, f: F) -> OrElse<Self, B, F>
-        where F: FnOnce(Self::Error) -> B + Send + 'static,
-              B: IntoFuture<Item = Self::Item>,
+    fn or_else<F, B, U>(self, f: F) -> OrElse<Self, B, F, T, E, U>
+        where F: FnOnce(E) -> B + Send + 'static,
+              B: IntoFuture<T, U>,
+              U: Send + 'static,
               Self: Sized,
     {
-        assert_future::<Self::Item, B::Error, _>(or_else::new(self, f))
+        assert_future::<T, U, _>(or_else::new(self, f))
     }
 
     /// Waits for either one of two futures to complete.
@@ -469,13 +458,13 @@ pub trait Future: Send + 'static {
     ///     }).boxed()
     /// }
     /// ```
-    fn select<B>(self, other: B) -> Select<Self, B::Future>
-        where B: IntoFuture<Item=Self::Item, Error=Self::Error>,
+    fn select<B>(self, other: B) -> Select<Self, B::Future, T, E>
+        where B: IntoFuture<T, E>,
               Self: Sized,
     {
         let f = select::new(self, other.into_future());
-        assert_future::<(Self::Item, SelectNext<Self, B::Future>),
-                        (Self::Error, SelectNext<Self, B::Future>), _>(f)
+        assert_future::<(T, SelectNext<Self, B::Future, T, E>),
+                        (E, SelectNext<Self, B::Future, T, E>), _>(f)
     }
 
     /// Joins the result of two futures, waiting for them both to complete.
@@ -508,12 +497,13 @@ pub trait Future: Send + 'static {
     ///     assert_eq!(b, 1);
     /// });
     /// ```
-    fn join<B>(self, other: B) -> Join<Self, B::Future>
-        where B: IntoFuture<Error=Self::Error>,
+    fn join<B, U>(self, other: B) -> Join<Self, B::Future, T, U, E>
+        where B: IntoFuture<U, E>,
+              U: Send + 'static,
               Self: Sized,
     {
         let f = join::new(self, other.into_future());
-        assert_future::<(Self::Item, B::Item), Self::Error, _>(f)
+        assert_future::<(T, U), E, _>(f)
     }
 
     /// Flatten the execution of this future when the successful result of this
@@ -538,16 +528,13 @@ pub trait Future: Send + 'static {
     /// let future_of_a_future = finished::<_, u32>(finished::<u32, u32>(1));
     /// let future_of_1 = future_of_a_future.flatten();
     /// ```
-    fn flatten(self) -> Flatten<Self>
-        where Self::Item: IntoFuture,
-              <<Self as Future>::Item as IntoFuture>::Error:
-                    From<<Self as Future>::Error>,
+    fn flatten<U>(self) -> Flatten<Self, T, E, U>
+        where T: IntoFuture<U, E>,
+              U: Send + 'static,
               Self: Sized
     {
         let f = flatten::new(self);
-        assert_future::<<<Self as Future>::Item as IntoFuture>::Item,
-                        <<Self as Future>::Item as IntoFuture>::Error,
-                        _>(f)
+        assert_future::<U, E, _>(f)
     }
 
     /// Consume this future and allow it to execute without cancelling it.
@@ -570,10 +557,10 @@ pub trait Future: Send + 'static {
 
 // Just a helper function to ensure the futures we're returning all have the
 // right implementations.
-fn assert_future<A, B, F>(t: F) -> F
-    where F: Future<Item=A, Error=B>,
-          A: Send + 'static,
-          B: Send + 'static,
+fn assert_future<T, E, A>(t: A) -> A
+    where A: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
 {
     t
 }
@@ -599,38 +586,33 @@ impl<F> Wake for F
 ///
 /// This trait is very similar to the `IntoIterator` trait and is intended to be
 /// used in a very similar fashion.
-pub trait IntoFuture: Send + 'static {
-    /// The future that this type can be converted into.
-    type Future: Future<Item=Self::Item, Error=Self::Error>;
-
-    /// The item that the future may resolve with.
-    type Item: Send + 'static;
-    /// The error that the future may resolve with.
-    type Error: Send + 'static;
+pub trait IntoFuture<T: Send + 'static, E: Send + 'static>: Send + 'static {
+    /// The type of future this can convert to.
+    type Future: Future<T, E>;
 
     /// Consumes this object and produces a future.
     fn into_future(self) -> Self::Future;
 }
 
-impl<F: Future> IntoFuture for F {
+impl<F, T, E> IntoFuture<T, E> for F
+    where F: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
     type Future = F;
-    type Item = F::Item;
-    type Error = F::Error;
 
     fn into_future(self) -> F {
         self
     }
 }
 
-impl<T, E> IntoFuture for Result<T, E>
-    where T: Send + 'static,
-          E: Send + 'static,
-{
-    type Future = Done<T, E>;
-    type Item = T;
-    type Error = E;
-
-    fn into_future(self) -> Done<T, E> {
-        done(self)
-    }
-}
+// impl<T, E> IntoFuture<T, E> for Result<T, E>
+//     where T: Send + 'static,
+//           E: Send + 'static,
+// {
+//     type Future = Done<T, E>;
+//
+//     fn into_future(self) -> Done<T, E> {
+//         done(self)
+//     }
+// }

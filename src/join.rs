@@ -7,20 +7,33 @@ use util::{self, Collapsed};
 /// Future for the `join` combinator, waiting for two futures to complete.
 ///
 /// This is created by this `Future::join` method.
-pub struct Join<A, B> where A: Future, B: Future<Error=A::Error> {
-    a: MaybeDone<A>,
-    b: MaybeDone<B>,
+pub struct Join<A, B, T, U, E>
+    where A: Future<T, E>,
+          B: Future<U, E>,
+          T: Send + 'static,
+          U: Send + 'static,
+          E: Send + 'static,
+{
+    a: MaybeDone<A, T, E>,
+    b: MaybeDone<B, U, E>,
 }
 
-enum MaybeDone<A: Future> {
-    NotYet(Collapsed<A>, Tokens),
-    Done(A::Item),
+enum MaybeDone<A, T, E>
+    where A: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
+    NotYet(Collapsed<A, T, E>, Tokens),
+    Done(T),
     Gone,
 }
 
-pub fn new<A, B>(a: A, b: B) -> Join<A, B>
-    where A: Future,
-          B: Future<Error=A::Error>,
+pub fn new<A, B, T, U, E>(a: A, b: B) -> Join<A, B, T, U, E>
+    where A: Future<T, E>,
+          B: Future<U, E>,
+          T: Send + 'static,
+          U: Send + 'static,
+          E: Send + 'static,
 {
     let a = Collapsed::Start(a);
     let b = Collapsed::Start(b);
@@ -30,15 +43,14 @@ pub fn new<A, B>(a: A, b: B) -> Join<A, B>
     }
 }
 
-impl<A, B> Future for Join<A, B>
-    where A: Future,
-          B: Future<Error=A::Error>,
+impl<A, B, T, U, E> Future<(T, U), E> for Join<A, B, T, U, E>
+    where A: Future<T, E>,
+          B: Future<U, E>,
+          T: Send + 'static,
+          U: Send + 'static,
+          E: Send + 'static,
 {
-    type Item = (A::Item, B::Item);
-    type Error = A::Error;
-
-    fn poll(&mut self, tokens: &Tokens)
-            -> Option<PollResult<Self::Item, Self::Error>> {
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<(T, U), E>> {
         match (self.a.poll(tokens), self.b.poll(tokens)) {
             (Ok(true), Ok(true)) => Some(Ok((self.a.take(), self.b.take()))),
             (Err(e), _) |
@@ -80,16 +92,19 @@ impl<A, B> Future for Join<A, B>
         }
     }
 
-    fn tailcall(&mut self)
-                -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<(T, U), E>>> {
         self.a.collapse();
         self.b.collapse();
         None
     }
 }
 
-impl<A: Future> MaybeDone<A> {
-    fn poll(&mut self, tokens: &Tokens) -> PollResult<bool, A::Error> {
+impl<A, T, E> MaybeDone<A, T, E>
+    where A: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
+    fn poll(&mut self, tokens: &Tokens) -> PollResult<bool, E> {
         let res = match *self {
             MaybeDone::NotYet(ref mut a, ref a_tokens) => {
                 if tokens.may_contain(a_tokens) {
@@ -110,7 +125,7 @@ impl<A: Future> MaybeDone<A> {
         }
     }
 
-    fn take(&mut self) -> A::Item {
+    fn take(&mut self) -> T {
         match mem::replace(self, MaybeDone::Gone) {
             MaybeDone::Done(a) => a,
             _ => panic!(),

@@ -8,8 +8,13 @@ use util::{self, Collapsed};
 /// complete.
 ///
 /// This is created by this `Future::select` method.
-pub struct Select<A, B> where A: Future, B: Future<Item=A::Item, Error=A::Error> {
-    inner: Option<(Collapsed<A>, Collapsed<B>)>,
+pub struct Select<A, B, T, E>
+    where A: Future<T, E>,
+          B: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
+    inner: Option<(Collapsed<A, T, E>, Collapsed<B, T, E>)>,
     a_tokens: Tokens,
     b_tokens: Tokens,
 }
@@ -18,18 +23,30 @@ pub struct Select<A, B> where A: Future, B: Future<Item=A::Item, Error=A::Error>
 ///
 /// This sentinel future represents the completion of the second future to a
 /// `select` which finished second.
-pub struct SelectNext<A, B> where A: Future, B: Future<Item=A::Item, Error=A::Error> {
-    inner: OneOf<A, B>,
+pub struct SelectNext<A, B, T, E>
+    where A: Future<T, E>,
+          B: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
+    inner: OneOf<A, B, T, E>,
 }
 
-enum OneOf<A, B> where A: Future, B: Future {
-    A(Collapsed<A>),
-    B(Collapsed<B>),
+enum OneOf<A, B, T, E>
+    where A: Future<T, E>,
+          B: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
+    A(Collapsed<A, T, E>),
+    B(Collapsed<B, T, E>),
 }
 
-pub fn new<A, B>(a: A, b: B) -> Select<A, B>
-    where A: Future,
-          B: Future<Item=A::Item, Error=A::Error>
+pub fn new<A, B, T, E>(a: A, b: B) -> Select<A, B, T, E>
+    where A: Future<T, E>,
+          B: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
 {
     let a = Collapsed::Start(a);
     let b = Collapsed::Start(b);
@@ -40,15 +57,18 @@ pub fn new<A, B>(a: A, b: B) -> Select<A, B>
     }
 }
 
-impl<A, B> Future for Select<A, B>
-    where A: Future,
-          B: Future<Item=A::Item, Error=A::Error>,
+impl<A, B, T, E>
+    Future<(T, SelectNext<A, B, T, E>),
+           (E, SelectNext<A, B, T, E>)>
+    for Select<A, B, T, E>
+    where A: Future<T, E>,
+          B: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
 {
-    type Item = (A::Item, SelectNext<A, B>);
-    type Error = (A::Error, SelectNext<A, B>);
-
     fn poll(&mut self, tokens: &Tokens)
-            -> Option<PollResult<Self::Item, Self::Error>> {
+            -> Option<PollResult<(T, SelectNext<A, B, T, E>),
+                                 (E, SelectNext<A, B, T, E>)>> {
         let (ret, is_a) = match self.inner {
             Some((_, ref mut b)) if !self.a_tokens.may_contain(tokens) => {
                 match b.poll(&(tokens & &self.b_tokens)) {
@@ -92,7 +112,8 @@ impl<A, B> Future for Select<A, B>
     }
 
     fn tailcall(&mut self)
-                -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
+                -> Option<Box<Future<(T, SelectNext<A, B, T, E>),
+                                     (E, SelectNext<A, B, T, E>)>>> {
         if let Some((ref mut a, ref mut b)) = self.inner {
             a.collapse();
             b.collapse();
@@ -101,15 +122,13 @@ impl<A, B> Future for Select<A, B>
     }
 }
 
-impl<A, B> Future for SelectNext<A, B>
-    where A: Future,
-          B: Future<Item=A::Item, Error=A::Error>,
+impl<A, B, T, E> Future<T, E> for SelectNext<A, B, T, E>
+    where A: Future<T, E>,
+          B: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
 {
-    type Item = A::Item;
-    type Error = A::Error;
-
-    fn poll(&mut self, tokens: &Tokens)
-            -> Option<PollResult<Self::Item, Self::Error>> {
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<T, E>> {
         match self.inner {
             OneOf::A(ref mut a) => a.poll(tokens),
             OneOf::B(ref mut b) => b.poll(tokens),
@@ -123,8 +142,7 @@ impl<A, B> Future for SelectNext<A, B>
         }
     }
 
-    fn tailcall(&mut self)
-                -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<T, E>>> {
         match self.inner {
             OneOf::A(ref mut a) => a.collapse(),
             OneOf::B(ref mut b) => b.collapse(),

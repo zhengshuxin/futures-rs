@@ -10,7 +10,7 @@ pub struct Empty<T, E>
     where T: Send + 'static,
           E: Send + 'static,
 {
-    _data: marker::PhantomData<(T, E)>,
+    _data: marker::PhantomData<fn() -> (T, E)>,
 }
 
 /// Creates a future which never resolves, representing a computation that never
@@ -19,17 +19,17 @@ pub struct Empty<T, E>
 /// The returned future will never resolve with a success but is still
 /// susceptible to cancellation. That is, if a callback is scheduled on the
 /// returned future, it is only run once the future is dropped (canceled).
-pub fn empty<T: Send + 'static, E: Send + 'static>() -> Empty<T, E> {
-    Empty { _data: marker::PhantomData }
-}
-
-impl<T, E> Future for Empty<T, E>
+pub fn empty<T, E>() -> Empty<T, E>
     where T: Send + 'static,
           E: Send + 'static,
 {
-    type Item = T;
-    type Error = E;
+    Empty { _data: marker::PhantomData }
+}
 
+impl<T, E> Future<T, E> for Empty<T, E>
+    where T: Send + 'static,
+          E: Send + 'static,
+{
     fn poll(&mut self, _: &Tokens) -> Option<PollResult<T, E>> {
         None
     }
@@ -39,7 +39,7 @@ impl<T, E> Future for Empty<T, E>
         Tokens::empty()
     }
 
-    fn tailcall(&mut self) -> Option<Box<Future<Item=T, Error=E>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<T, E>>> {
         None
     }
 }

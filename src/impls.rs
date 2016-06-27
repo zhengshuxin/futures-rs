@@ -3,15 +3,11 @@ use std::sync::Arc;
 
 use {Future, PollResult, Wake, Tokens, empty};
 
-impl<T, E> Future for Box<Future<Item=T, Error=E>>
+impl<T, E> Future<T, E> for Box<Future<T, E>>
     where T: Send + 'static,
           E: Send + 'static,
 {
-    type Item = T;
-    type Error = E;
-
-    fn poll(&mut self, tokens: &Tokens)
-            -> Option<PollResult<Self::Item, Self::Error>> {
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<T, E>> {
         (**self).poll(tokens)
     }
 
@@ -19,8 +15,7 @@ impl<T, E> Future for Box<Future<Item=T, Error=E>>
         (**self).schedule(wake)
     }
 
-    fn tailcall(&mut self)
-                -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<T, E>>> {
         if let Some(f) = (**self).tailcall() {
             return Some(f)
         }
@@ -28,12 +23,12 @@ impl<T, E> Future for Box<Future<Item=T, Error=E>>
     }
 }
 
-impl<F: Future> Future for Box<F> {
-    type Item = F::Item;
-    type Error = F::Error;
-
-    fn poll(&mut self, tokens: &Tokens)
-            -> Option<PollResult<Self::Item, Self::Error>> {
+impl<F, T, E> Future<T, E> for Box<F>
+    where F: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<T, E>> {
         (**self).poll(tokens)
     }
 
@@ -41,8 +36,7 @@ impl<F: Future> Future for Box<F> {
         (**self).schedule(wake)
     }
 
-    fn tailcall(&mut self)
-                -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<T, E>>> {
         (**self).tailcall()
     }
 }

@@ -7,8 +7,11 @@ use util;
 /// A future representing a finished but erroneous computation.
 ///
 /// Created by the `failed` function.
-pub struct Failed<T, E> {
-    _t: marker::PhantomData<T>,
+pub struct Failed<T, E>
+    where T: Send + 'static,
+          E: Send + 'static,
+{
+    _t: marker::PhantomData<fn() -> T>,
     e: Option<E>,
 }
 
@@ -31,13 +34,10 @@ pub fn failed<T, E>(e: E) -> Failed<T, E>
     Failed { _t: marker::PhantomData, e: Some(e) }
 }
 
-impl<T, E> Future for Failed<T, E>
+impl<T, E> Future<T, E> for Failed<T, E>
     where T: Send + 'static,
           E: Send + 'static,
 {
-    type Item = T;
-    type Error = E;
-
     fn poll(&mut self, _: &Tokens) -> Option<PollResult<T, E>> {
         Some(util::opt2poll(self.e.take())
                   .and_then(|e| Err(PollError::Other(e))))
@@ -47,7 +47,7 @@ impl<T, E> Future for Failed<T, E>
         util::done(wake)
     }
 
-    fn tailcall(&mut self) -> Option<Box<Future<Item=T, Error=E>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<T, E>>> {
         None
     }
 }

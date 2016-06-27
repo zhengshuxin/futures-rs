@@ -8,30 +8,38 @@ use chain::Chain;
 /// another future which completes successfully.
 ///
 /// This is created by this `Future::and_then` method.
-pub struct AndThen<A, B, F> where A: Future, B: IntoFuture {
-    state: Chain<A, B::Future, F>,
+pub struct AndThen<A, B, F, T, E, U>
+    where A: Future<T, E>,
+          B: IntoFuture<U, E>,
+          T: Send + 'static,
+          U: Send + 'static,
+          E: Send + 'static,
+{
+    state: Chain<A, B::Future, F, T, E, U, E>,
 }
 
-pub fn new<A, B, F>(future: A, f: F) -> AndThen<A, B, F>
-    where A: Future,
-          B: IntoFuture,
-          F: Send + 'static,
+pub fn new<A, B, F, T, E, U>(future: A, f: F) -> AndThen<A, B, F, T, E, U>
+    where A: Future<T, E>,
+          B: IntoFuture<U, E>,
+          F: FnOnce(T) -> B + Send + 'static,
+          T: Send + 'static,
+          U: Send + 'static,
+          E: Send + 'static,
 {
     AndThen {
         state: Chain::new(future, f),
     }
 }
 
-impl<A, B, F> Future for AndThen<A, B, F>
-    where A: Future,
-          B: IntoFuture<Error=A::Error>,
-          F: FnOnce(A::Item) -> B + Send + 'static,
+impl<A, B, F, T, E, U> Future<U, E> for AndThen<A, B, F, T, E, U>
+    where A: Future<T, E>,
+          B: IntoFuture<U, E>,
+          F: FnOnce(T) -> B + Send + 'static,
+          T: Send + 'static,
+          U: Send + 'static,
+          E: Send + 'static,
 {
-    type Item = B::Item;
-    type Error = B::Error;
-
-    fn poll(&mut self, tokens: &Tokens)
-            -> Option<PollResult<B::Item, B::Error>> {
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<U, E>> {
         self.state.poll(tokens, |result, f| {
             let e = try!(result);
             util::recover(|| f(e)).map(|b| Err(b.into_future()))
@@ -42,8 +50,7 @@ impl<A, B, F> Future for AndThen<A, B, F>
         self.state.schedule(wake)
     }
 
-    fn tailcall(&mut self)
-                -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<U, E>>> {
         self.state.tailcall()
     }
 }

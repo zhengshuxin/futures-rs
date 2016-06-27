@@ -6,13 +6,21 @@ use util::{self, Collapsed};
 /// Future for the `map` combinator, changing the type of a future.
 ///
 /// This is created by this `Future::map` method.
-pub struct Map<A, F> where A: Future {
-    future: Collapsed<A>,
+pub struct Map<A, F, T, E>
+    where A: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+{
+    future: Collapsed<A, T, E>,
     f: Option<F>,
 }
 
-pub fn new<A, F>(future: A, f: F) -> Map<A, F>
-    where A: Future,
+pub fn new<U, A, F, T, E>(future: A, f: F) -> Map<A, F, T, E>
+    where A: Future<T, E>,
+          F: FnOnce(T) -> U + Send + 'static,
+          U: Send + 'static,
+          T: Send + 'static,
+          E: Send + 'static,
 {
     Map {
         future: Collapsed::Start(future),
@@ -20,15 +28,14 @@ pub fn new<A, F>(future: A, f: F) -> Map<A, F>
     }
 }
 
-impl<U, A, F> Future for Map<A, F>
-    where A: Future,
-          F: FnOnce(A::Item) -> U + Send + 'static,
+impl<U, A, F, T, E> Future<U, E> for Map<A, F, T, E>
+    where A: Future<T, E>,
+          F: FnOnce(T) -> U + Send + 'static,
           U: Send + 'static,
+          T: Send + 'static,
+          E: Send + 'static,
 {
-    type Item = U;
-    type Error = A::Error;
-
-    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<U, A::Error>> {
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<U, E>> {
         let result = match self.future.poll(tokens) {
             Some(result) => result,
             None => return None,
@@ -43,8 +50,7 @@ impl<U, A, F> Future for Map<A, F>
         self.future.schedule(wake)
     }
 
-    fn tailcall(&mut self)
-                -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<U, E>>> {
         self.future.collapse();
         None
     }
