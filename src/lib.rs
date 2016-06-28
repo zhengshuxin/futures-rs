@@ -230,7 +230,7 @@ pub trait Future<T: Send + 'static, E: Send + 'static>: Send + 'static {
     /// ```
     /// use futures::*;
     ///
-    /// let a: Box<Future<Item=i32, Error=i32>> = done(Ok(1)).boxed();
+    /// let a: Box<Future<i32, i32>> = done(Ok(1)).boxed();
     /// ```
     fn boxed(self) -> Box<Future<T, E>> where Self: Sized {
         Box::new(self)
@@ -323,7 +323,7 @@ pub trait Future<T: Send + 'static, E: Send + 'static>: Send + 'static {
     ///
     /// let future_of_1 = finished::<u32, u32>(1);
     /// let future_of_4 = future_of_1.then(|x| {
-    ///     x.map(|y| y + 3)
+    ///     done(x.map(|y| y + 3))
     /// });
     ///
     /// let future_of_err_1 = failed::<u32, u32>(1);
@@ -368,7 +368,7 @@ pub trait Future<T: Send + 'static, E: Send + 'static>: Send + 'static {
     ///
     /// let future_of_1 = finished::<u32, u32>(1);
     /// let future_of_4 = future_of_1.and_then(|x| {
-    ///     Ok(x + 3)
+    ///     finished(x + 3)
     /// });
     ///
     /// let future_of_err_1 = failed::<u32, u32>(1);
@@ -408,8 +408,8 @@ pub trait Future<T: Send + 'static, E: Send + 'static>: Send + 'static {
     /// use futures::*;
     ///
     /// let future_of_err_1 = failed::<u32, u32>(1);
-    /// let future_of_4 = future_of_err_1.or_else(|x| -> Result<u32, u32> {
-    ///     Ok(x + 3)
+    /// let future_of_4 = future_of_err_1.or_else(|x| -> Finished<u32, u32> {
+    ///     finished(x + 3)
     /// });
     ///
     /// let future_of_1 = finished::<u32, u32>(1);
@@ -446,9 +446,11 @@ pub trait Future<T: Send + 'static, E: Send + 'static>: Send + 'static {
     ///
     /// // A poor-man's join implemented on top of select
     ///
-    /// fn join<A>(a: A, b: A)
-    ///            -> Box<Future<Item=(A::Item, A::Item), Error=A::Error>>
-    ///     where A: Future,
+    /// fn join<A, T, U>(a: A, b: A)
+    ///                  -> Box<Future<(T, T), U>>
+    ///     where A: Future<T, U>,
+    ///           T: Send + 'static,
+    ///           U: Send + 'static,
     /// {
     ///     a.select(b).then(|res| {
     ///         match res {

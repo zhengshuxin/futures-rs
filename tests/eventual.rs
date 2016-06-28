@@ -10,9 +10,15 @@ fn and_then1() {
     let (tx, rx) = channel();
 
     let tx2 = tx.clone();
-    let p1 = finished::<_, i32>("a").then(move |t| { tx2.send("first").unwrap(); t });
+    let p1 = finished::<_, i32>("a").then(move |t| {
+        tx2.send("first").unwrap();
+        done(t)
+    });
     let tx2 = tx.clone();
-    let p2 = finished("b").then(move |t| { tx2.send("second").unwrap(); t });
+    let p2 = finished("b").then(move |t| {
+        tx2.send("second").unwrap();
+        done(t)
+    });
     let f = p1.and_then(|_| p2);
 
     assert!(rx.try_recv().is_err());
@@ -28,9 +34,15 @@ fn and_then2() {
     let (tx, rx) = channel();
 
     let tx2 = tx.clone();
-    let p1 = failed::<i32, _>(2).then(move |t| { tx2.send("first").unwrap(); t });
+    let p1 = failed::<i32, _>(2).then(move |t| {
+        tx2.send("first").unwrap();
+        done(t)
+    });
     let tx2 = tx.clone();
-    let p2 = finished("b").then(move |t| { tx2.send("second").unwrap(); t });
+    let p2 = finished("b").then(move |t| {
+        tx2.send("second").unwrap();
+        done(t)
+    });
     let f = p1.and_then(|_| p2);
 
     assert!(rx.try_recv().is_err());

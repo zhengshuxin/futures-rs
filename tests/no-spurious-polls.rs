@@ -11,10 +11,7 @@ struct MyFuture {
     tokens: Tokens,
 }
 
-impl Future for MyFuture {
-    type Item = ();
-    type Error = ();
-
+impl Future<(), ()> for MyFuture {
     fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<(), ()>> {
         self.tx.send(tokens.clone()).unwrap();
         None
@@ -25,7 +22,7 @@ impl Future for MyFuture {
         self.tokens.clone()
     }
 
-    fn tailcall(&mut self) -> Option<Box<Future<Item=(), Error=()>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<(), ()>>> {
         None
     }
 }

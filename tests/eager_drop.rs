@@ -36,12 +36,13 @@ struct FutureData<F, T> {
     future: F,
 }
 
-impl<F: Future, T: Send + 'static> Future for FutureData<F, T> {
-    type Item = F::Item;
-    type Error = F::Error;
-
-    fn poll(&mut self, tokens: &Tokens)
-            -> Option<PollResult<Self::Item, Self::Error>> {
+impl<F, T, U, V> Future<U, V> for FutureData<F, T>
+    where F: Future<U, V>,
+          T: Send + 'static,
+          U: Send + 'static,
+          V: Send + 'static,
+{
+    fn poll(&mut self, tokens: &Tokens) -> Option<PollResult<U, V>> {
         self.future.poll(tokens)
     }
 
@@ -49,7 +50,7 @@ impl<F: Future, T: Send + 'static> Future for FutureData<F, T> {
         self.future.schedule(wake)
     }
 
-    fn tailcall(&mut self) -> Option<Box<Future<Item=F::Item, Error=F::Error>>> {
+    fn tailcall(&mut self) -> Option<Box<Future<U, V>>> {
         None
     }
 }

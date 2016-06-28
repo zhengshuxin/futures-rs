@@ -15,16 +15,16 @@ fn unwrap<A, B>(r: PollResult<A, B>) -> Result<A, B> {
 }
 
 
-fn f_ok(a: i32) -> Done<i32, u32> { Ok(a).into_future() }
-fn f_err(a: u32) -> Done<i32, u32> { Err(a).into_future() }
+fn f_ok(a: i32) -> Done<i32, u32> { done(Ok(a)) }
+fn f_err(a: u32) -> Done<i32, u32> { done(Err(a)) }
 fn ok(a: i32) -> Result<i32, u32> { Ok(a) }
 fn err(a: u32) -> Result<i32, u32> { Err(a) }
 
-fn assert_done<T, F>(mut f: F, result: Result<T::Item, T::Error>)
-    where T: Future,
-          T::Item: Eq + fmt::Debug,
-          T::Error: Eq + fmt::Debug,
-          F: FnMut() -> T,
+fn assert_done<A, T, E, F>(mut f: F, result: Result<T, E>)
+    where A: Future<T, E>,
+          T: Eq + fmt::Debug + Send + 'static,
+          E: Eq + fmt::Debug + Send + 'static,
+          F: FnMut() -> A,
 {
     let mut a = f();
     assert_eq!(&unwrap(a.poll(&Tokens::all()).unwrap()), &result);
@@ -36,7 +36,12 @@ fn assert_done<T, F>(mut f: F, result: Result<T::Item, T::Error>)
     drop(a);
 }
 
-fn assert_empty<T: Future, F: FnMut() -> T>(mut f: F) {
+fn assert_empty<A, T, E, F>(mut f: F)
+    where A: Future<T, E>,
+          T: Send + 'static,
+          E: Send + 'static,
+          F: FnMut() -> A,
+{
     assert!(f().poll(&Tokens::all()).is_none());
 
     let mut a = f();
@@ -80,10 +85,13 @@ fn assert_panic<T, E>(r: PollResult<T, E>) {
 //     }
 // }
 
-fn unselect<T, U, E>(r: Result<(T, U), (E, U)>) -> Result<T, E> {
+fn unselect<T, U, E>(r: Result<(T, U), (E, U)>) -> Done<T, E>
+    where T: Send + 'static,
+          E: Send + 'static,
+{
     match r {
-        Ok((t, _)) => Ok(t),
-        Err((e, _)) => Err(e),
+        Ok((t, _)) => done(Ok(t)),
+        Err((e, _)) => done(Err(e)),
     }
 }
 
@@ -92,14 +100,14 @@ fn result_smoke() {
     fn is_future_v<A, B, C>(_: C)
         where A: Send + 'static,
               B: Send + 'static,
-              C: Future<Item=A, Error=B>
+              C: Future<A, B>
     {}
 
     is_future_v::<i32, u32, _>(f_ok(1).map(|a| a + 1));
     is_future_v::<i32, u32, _>(f_ok(1).map_err(|a| a + 1));
-    is_future_v::<i32, u32, _>(f_ok(1).and_then(|a| Ok(a)));
-    is_future_v::<i32, u32, _>(f_ok(1).or_else(|a| Err(a)));
-    is_future_v::<(i32, i32), u32, _>(f_ok(1).join(Err(3)));
+    is_future_v::<i32, u32, _>(f_ok(1).and_then(|a| done(Ok(a))));
+    is_future_v::<i32, u32, _>(f_ok(1).or_else(|a| done(Err(a))));
+    is_future_v::<(i32, i32), u32, _>(f_ok(1).join(done(Err(3))));
     is_future_v::<i32, u32, _>(f_ok(1).map(move |a| f_ok(a)).flatten());
 
     assert_done(|| f_ok(1), ok(1));
@@ -112,26 +120,26 @@ fn result_smoke() {
     assert_done(|| f_err(1).map(|a| a + 2), err(1));
     assert_done(|| f_ok(1).map_err(|a| a + 2), ok(1));
     assert_done(|| f_err(1).map_err(|a| a + 2), err(3));
-    assert_done(|| f_ok(1).and_then(|a| Ok(a + 2)), ok(3));
-    assert_done(|| f_err(1).and_then(|a| Ok(a + 2)), err(1));
-    assert_done(|| f_ok(1).and_then(|a| Err(a as u32 + 3)), err(4));
-    assert_done(|| f_err(1).and_then(|a| Err(a as u32 + 4)), err(1));
-    assert_done(|| f_ok(1).or_else(|a| Ok(a as i32 + 2)), ok(1));
-    assert_done(|| f_err(1).or_else(|a| Ok(a as i32 + 2)), ok(3));
-    assert_done(|| f_ok(1).or_else(|a| Err(a + 3)), ok(1));
-    assert_done(|| f_err(1).or_else(|a| Err(a + 4)), err(5));
+    assert_done(|| f_ok(1).and_then(|a| done(Ok(a + 2))), ok(3));
+    assert_done(|| f_err(1).and_then(|a| done(Ok(a + 2))), err(1));
+    assert_done(|| f_ok(1).and_then(|a| done(Err(a as u32 + 3))), err(4));
+    assert_done(|| f_err(1).and_then(|a| done(Err(a as u32 + 4))), err(1));
+    assert_done(|| f_ok(1).or_else(|a| done(Ok(a as i32 + 2))), ok(1));
+    assert_done(|| f_err(1).or_else(|a| done(Ok(a as i32 + 2))), ok(3));
+    assert_done(|| f_ok(1).or_else(|a| done(Err(a + 3))), ok(1));
+    assert_done(|| f_err(1).or_else(|a| done(Err(a + 4))), err(5));
     assert_done(|| f_ok(1).select(f_err(2)).then(unselect), ok(1));
-    assert_done(|| f_ok(1).select(Ok(2)).then(unselect), ok(1));
+    assert_done(|| f_ok(1).select(done(Ok(2))).then(unselect), ok(1));
     assert_done(|| f_err(1).select(f_ok(1)).then(unselect), err(1));
     assert_done(|| f_ok(1).select(empty()).then(unselect), Ok(1));
     assert_done(|| empty().select(f_ok(1)).then(unselect), Ok(1));
     assert_done(|| f_ok(1).join(f_err(1)), Err(1));
-    assert_done(|| f_ok(1).join(Ok(2)), Ok((1, 2)));
+    assert_done(|| f_ok(1).join(done(Ok(2))), Ok((1, 2)));
     assert_done(|| f_err(1).join(f_ok(1)), Err(1));
-    assert_done(|| f_ok(1).then(|_| Ok(2)), ok(2));
-    assert_done(|| f_ok(1).then(|_| Err(2)), err(2));
-    assert_done(|| f_err(1).then(|_| Ok(2)), ok(2));
-    assert_done(|| f_err(1).then(|_| Err(2)), err(2));
+    assert_done(|| f_ok(1).then(|_| done(Ok(2))), ok(2));
+    assert_done(|| f_ok(1).then(|_| done(Err(2))), err(2));
+    assert_done(|| f_err(1).then(|_| done(Ok(2))), ok(2));
+    assert_done(|| f_err(1).then(|_| done(Err(2))), err(2));
 }
 
 #[test]
@@ -149,7 +157,7 @@ fn test_empty() {
     assert_empty(|| f_ok(1).and_then(move |_| empty()));
     assert_empty(|| empty().map(|a| a + 1));
     assert_empty(|| empty().map_err(|a| a + 1));
-    assert_empty(|| empty().then(|a| a));
+    assert_empty(|| empty().then(|a| done(a)));
 }
 
 #[test]
@@ -170,7 +178,7 @@ fn flatten() {
     assert_done(|| finished(finished(1)).flatten(), ok(1));
     assert_done(|| finished(failed(1)).flatten(), err(1));
     assert_done(|| failed(1u32).map(finished).flatten(), err(1));
-    assert_done(|| futures::finished::<_, u8>(futures::finished::<_, u32>(1))
+    assert_done(|| futures::finished::<_, u32>(futures::finished::<_, u32>(1))
                            .flatten(), ok(1));
     assert_empty(|| finished(empty::<i32, u32>()).flatten());
     assert_empty(|| empty::<i32, u32>().map(finished).flatten());
@@ -337,10 +345,13 @@ fn cancel_propagates() {
 
 #[test]
 fn select2() {
-    fn d<T, U, E>(r: Result<(T, U), (E, U)>) -> Result<T, E> {
+    fn d<T, U, E>(r: Result<(T, U), (E, U)>) -> Done<T, E>
+        where T: Send + 'static,
+              E: Send + 'static,
+    {
         match r {
-            Ok((t, _u)) => Ok(t),
-            Err((e, _u)) => Err(e),
+            Ok((t, _u)) => done(Ok(t)),
+            Err((e, _u)) => done(Err(e)),
         }
     }
 
