@@ -252,18 +252,18 @@ mod forget;
 /// zero-cost and don't impose any extra layers of indirection you wouldn't
 /// otherwise have to write down.
 // TODO: expand this
-pub trait Future: 'static {
+pub trait Future {
 
     /// The type of value that this future will resolved with if it is
     /// successful.
-    type Item: 'static;
+    type Item;
 
     /// The type of error that this future will resolve with if it fails in a
     /// normal fashion.
     ///
     /// Futures may also fail due to panics or cancellation, but that is
     /// expressed through the `PollError` type, not this type.
-    type Error: 'static;
+    type Error;
 
     /// Query this future to see if its value has become available.
     ///
@@ -383,7 +383,7 @@ pub trait Future: 'static {
     /// let a: BoxFuture<i32, i32> = done(Ok(1)).boxed();
     /// ```
     fn boxed(self) -> BoxFuture<Self::Item, Self::Error>
-        where Self: Sized + Send
+        where Self: Sized + Send + 'static
     {
         Box::new(self)
     }
@@ -412,8 +412,7 @@ pub trait Future: 'static {
     /// let future_of_4 = future_of_1.map(|x| x + 3);
     /// ```
     fn map<F, U>(self, f: F) -> Map<Self, F>
-        where F: FnOnce(Self::Item) -> U + 'static,
-              U: 'static,
+        where F: FnOnce(Self::Item) -> U,
               Self: Sized,
     {
         assert_future::<U, Self::Error, _>(map::new(self, f))
@@ -442,8 +441,7 @@ pub trait Future: 'static {
     /// let future_of_err_4 = future_of_err_1.map_err(|x| x + 3);
     /// ```
     fn map_err<F, E>(self, f: F) -> MapErr<Self, F>
-        where F: FnOnce(Self::Error) -> E + 'static,
-              E: 'static,
+        where F: FnOnce(Self::Error) -> E,
               Self: Sized,
     {
         assert_future::<Self::Item, E, _>(map_err::new(self, f))
@@ -487,7 +485,7 @@ pub trait Future: 'static {
     /// });
     /// ```
     fn then<F, B>(self, f: F) -> Then<Self, B, F>
-        where F: FnOnce(Result<Self::Item, Self::Error>) -> B + 'static,
+        where F: FnOnce(Result<Self::Item, Self::Error>) -> B,
               B: IntoFuture,
               Self: Sized,
     {
@@ -527,7 +525,7 @@ pub trait Future: 'static {
     /// });
     /// ```
     fn and_then<F, B>(self, f: F) -> AndThen<Self, B, F>
-        where F: FnOnce(Self::Item) -> B + 'static,
+        where F: FnOnce(Self::Item) -> B,
               B: IntoFuture<Error = Self::Error>,
               Self: Sized,
     {
@@ -567,7 +565,7 @@ pub trait Future: 'static {
     /// });
     /// ```
     fn or_else<F, B>(self, f: F) -> OrElse<Self, B, F>
-        where F: FnOnce(Self::Error) -> B + 'static,
+        where F: FnOnce(Self::Error) -> B,
               B: IntoFuture<Item = Self::Item>,
               Self: Sized,
     {
@@ -783,7 +781,7 @@ pub trait Future: 'static {
     ///
     /// By using objects like `LoopData`, any future can become `Send` to use
     /// this method to drive it to completion.
-    fn forget(self) where Self: Sized + Send {
+    fn forget(self) where Self: Sized + Send + 'static {
         forget::forget(self);
     }
 }
@@ -795,8 +793,6 @@ pub type BoxFuture<T, E> = Box<Future<Item = T, Error = E> + Send>;
 // right implementations.
 fn assert_future<A, B, F>(t: F) -> F
     where F: Future<Item=A, Error=B>,
-          A: 'static,
-          B: 'static,
 {
     t
 }
@@ -805,14 +801,14 @@ fn assert_future<A, B, F>(t: F) -> F
 ///
 /// This trait is very similar to the `IntoIterator` trait and is intended to be
 /// used in a very similar fashion.
-pub trait IntoFuture: 'static {
+pub trait IntoFuture {
     /// The future that this type can be converted into.
     type Future: Future<Item=Self::Item, Error=Self::Error>;
 
     /// The item that the future may resolve with.
-    type Item: 'static;
+    type Item;
     /// The error that the future may resolve with.
-    type Error: 'static;
+    type Error;
 
     /// Consumes this object and produces a future.
     fn into_future(self) -> Self::Future;
@@ -828,10 +824,7 @@ impl<F: Future> IntoFuture for F {
     }
 }
 
-impl<T, E> IntoFuture for Result<T, E>
-    where T: 'static,
-          E: 'static,
-{
+impl<T, E> IntoFuture for Result<T, E> {
     type Future = Done<T, E>;
     type Item = T;
     type Error = E;

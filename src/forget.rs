@@ -1,6 +1,6 @@
 use {Future, Poll, Task};
 
-pub fn forget<T: Future + Send>(t: T) {
+pub fn forget<T: Future + Send + 'static>(t: T) {
     let thunk = ThunkFuture { inner: t };
     Task::new().run(Box::new(thunk))
 }

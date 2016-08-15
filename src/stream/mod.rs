@@ -88,12 +88,12 @@ mod impls;
 /// `into_future` adaptor can be used here to convert any stream into a future
 /// for use with other future methods like `join` and `select`.
 // TODO: more here
-pub trait Stream: 'static {
+pub trait Stream {
     /// The type of item this stream will yield on success.
-    type Item: 'static;
+    type Item;
 
     /// The type of error this stream may generate.
-    type Error: 'static;
+    type Error;
 
     /// Attempt to pull out the next value of this stream, returning `None` if
     /// the stream is finished.
@@ -179,7 +179,7 @@ pub trait Stream: 'static {
     /// let a: BoxStream<i32, i32> = rx.boxed();
     /// ```
     fn boxed(self) -> BoxStream<Self::Item, Self::Error>
-        where Self: Sized + Send
+        where Self: Sized + Send + 'static,
     {
         Box::new(self)
     }
@@ -215,8 +215,7 @@ pub trait Stream: 'static {
     /// let rx = rx.map(|x| x + 3);
     /// ```
     fn map<U, F>(self, f: F) -> Map<Self, F>
-        where F: FnMut(Self::Item) -> U + 'static,
-              U: 'static,
+        where F: FnMut(Self::Item) -> U,
               Self: Sized
     {
         map::new(self, f)
@@ -241,8 +240,7 @@ pub trait Stream: 'static {
     /// let rx = rx.map_err(|x| x + 3);
     /// ```
     fn map_err<U, F>(self, f: F) -> MapErr<Self, F>
-        where F: FnMut(Self::Error) -> U + 'static,
-              U: 'static,
+        where F: FnMut(Self::Error) -> U,
               Self: Sized
     {
         map_err::new(self, f)
@@ -271,7 +269,7 @@ pub trait Stream: 'static {
     /// let evens = rx.filter(|x| x % 0 == 2);
     /// ```
     fn filter<F>(self, f: F) -> Filter<Self, F>
-        where F: FnMut(&Self::Item) -> bool + 'static,
+        where F: FnMut(&Self::Item) -> bool,
               Self: Sized
     {
         filter::new(self, f)
@@ -306,7 +304,7 @@ pub trait Stream: 'static {
     /// });
     /// ```
     fn filter_map<F, B>(self, f: F) -> FilterMap<Self, F>
-        where F: FnMut(Self::Item) -> Option<B> + 'static,
+        where F: FnMut(Self::Item) -> Option<B>,
               Self: Sized
     {
         filter_map::new(self, f)
@@ -344,7 +342,7 @@ pub trait Stream: 'static {
     /// });
     /// ```
     fn then<F, U>(self, f: F) -> Then<Self, F, U>
-        where F: FnMut(Result<Self::Item, Self::Error>) -> U + 'static,
+        where F: FnMut(Result<Self::Item, Self::Error>) -> U,
               U: IntoFuture,
               Self: Sized
     {
@@ -387,7 +385,7 @@ pub trait Stream: 'static {
     /// });
     /// ```
     fn and_then<F, U>(self, f: F) -> AndThen<Self, F, U>
-        where F: FnMut(Self::Item) -> U + 'static,
+        where F: FnMut(Self::Item) -> U,
               U: IntoFuture<Error = Self::Error>,
               Self: Sized
     {
@@ -430,7 +428,7 @@ pub trait Stream: 'static {
     /// });
     /// ```
     fn or_else<F, U>(self, f: F) -> OrElse<Self, F, U>
-        where F: FnMut(Self::Error) -> U + 'static,
+        where F: FnMut(Self::Error) -> U,
               U: IntoFuture<Item = Self::Item>,
               Self: Sized
     {
@@ -511,10 +509,9 @@ pub trait Stream: 'static {
     /// assert_eq!(result.poll(&mut Task::new()), Poll::Ok(15));
     /// ```
     fn fold<F, T, Fut>(self, init: T, f: F) -> Fold<Self, F, Fut, T>
-        where F: FnMut(T, Self::Item) -> Fut + 'static,
+        where F: FnMut(T, Self::Item) -> Fut,
               Fut: IntoFuture<Item = T>,
               Fut::Error: Into<Self::Error>,
-              T: 'static,
               Self: Sized
     {
         fold::new(self, f, init)
@@ -559,7 +556,7 @@ pub trait Stream: 'static {
     /// returns false all future elements will be returned from the underlying
     /// stream.
     fn skip_while<P, R>(self, pred: P) -> SkipWhile<Self, P, R>
-        where P: FnMut(&Self::Item) -> R + 'static,
+        where P: FnMut(&Self::Item) -> R,
               R: IntoFuture<Item=bool, Error=Self::Error>,
               Self: Sized
     {
@@ -578,7 +575,7 @@ pub trait Stream: 'static {
     /// closure will cause iteration to be halted immediately and the future
     /// will resolve to that error.
     fn for_each<F>(self, f: F) -> ForEach<Self, F>
-        where F: FnMut(Self::Item) -> Result<(), Self::Error> + 'static,
+        where F: FnMut(Self::Item) -> Result<(), Self::Error>,
               Self: Sized
     {
         for_each::new(self, f)
