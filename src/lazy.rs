@@ -79,9 +79,4 @@ impl<F, R> Future for Lazy<F, R::Future>
     fn schedule(&mut self, task: &mut Task) {
         self.get().schedule(task)
     }
-
-    unsafe fn tailcall(&mut self)
-                       -> Option<Box<Future<Item=R::Item, Error=R::Error>>> {
-        self.get().tailcall()
-    }
 }

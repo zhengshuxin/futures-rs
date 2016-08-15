@@ -1,6 +1,4 @@
-use std::mem;
-
-use {Future, empty, Poll, Task};
+use {Future, Poll, Task};
 
 impl<T, E> Future for Box<Future<Item=T, Error=E>>
     where T: 'static,
@@ -15,14 +13,6 @@ impl<T, E> Future for Box<Future<Item=T, Error=E>>
 
     fn schedule(&mut self, task: &mut Task) {
         (**self).schedule(task)
-    }
-
-    unsafe fn tailcall(&mut self)
-                       -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
-        if let Some(f) = (**self).tailcall() {
-            return Some(f)
-        }
-        Some(mem::replace(self, Box::new(empty())))
     }
 }
 
@@ -40,16 +30,6 @@ impl<T, E> Future for Box<Future<Item=T, Error=E> + Send>
     fn schedule(&mut self, task: &mut Task) {
         (**self).schedule(task)
     }
-
-    unsafe fn tailcall(&mut self)
-                       -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
-        if let Some(f) = (**self).tailcall() {
-            return Some(f)
-        }
-        let me = mem::replace(self, Box::new(empty()));
-        let me: Box<Future<Item=T, Error=E>> = me;
-        Some(me)
-    }
 }
 
 impl<F: Future> Future for Box<F> {
@@ -62,10 +42,5 @@ impl<F: Future> Future for Box<F> {
 
     fn schedule(&mut self, task: &mut Task) {
         (**self).schedule(task)
-    }
-
-    unsafe fn tailcall(&mut self)
-                       -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
-        (**self).tailcall()
     }
 }

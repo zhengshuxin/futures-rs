@@ -1,10 +1,9 @@
 use std::mem;
 
-use util::Collapsed;
 use {Future, Task, Poll};
 
 pub enum Chain<A, B, C> where A: Future, B: 'static {
-    First(Collapsed<A>, C),
+    First(A, C),
     Second(B),
     Done,
 }
@@ -15,7 +14,7 @@ impl<A, B, C> Chain<A, B, C>
           C: 'static,
 {
     pub fn new(a: A, c: C) -> Chain<A, B, C> {
-        Chain::First(Collapsed::Start(a), c)
+        Chain::First(a, c)
     }
 
     pub fn poll<F>(&mut self, task: &mut Task, f: F) -> Poll<B::Item, B::Error>
@@ -47,18 +46,6 @@ impl<A, B, C> Chain<A, B, C>
             Chain::First(ref mut a, _) => a.schedule(task),
             Chain::Second(ref mut b) => b.schedule(task),
             Chain::Done => task.notify(),
-        }
-    }
-
-    pub unsafe fn tailcall(&mut self)
-                           -> Option<Box<Future<Item=B::Item, Error=B::Error>>> {
-        match *self {
-            Chain::First(ref mut a, _) => {
-                a.collapse();
-                None
-            }
-            Chain::Second(ref mut b) => b.tailcall(),
-            Chain::Done => None,
         }
     }
 }

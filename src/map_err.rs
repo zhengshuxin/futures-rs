@@ -1,11 +1,10 @@
 use {Future, Task, Poll};
-use util::Collapsed;
 
 /// Future for the `map_err` combinator, changing the error type of a future.
 ///
 /// This is created by this `Future::map_err` method.
 pub struct MapErr<A, F> where A: Future {
-    future: Collapsed<A>,
+    future: A,
     f: Option<F>,
 }
 
@@ -13,7 +12,7 @@ pub fn new<A, F>(future: A, f: F) -> MapErr<A, F>
     where A: Future
 {
     MapErr {
-        future: Collapsed::Start(future),
+        future: future,
         f: Some(f),
     }
 }
@@ -33,11 +32,5 @@ impl<U, A, F> Future for MapErr<A, F>
 
     fn schedule(&mut self, task: &mut Task) {
         self.future.schedule(task)
-    }
-
-    unsafe fn tailcall(&mut self)
-                       -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
-        self.future.collapse();
-        None
     }
 }

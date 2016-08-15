@@ -157,7 +157,6 @@ extern crate log;
 // internal utilities
 mod lock;
 mod slot;
-mod util;
 
 #[macro_use]
 mod poll;
@@ -231,9 +230,9 @@ mod forget;
 ///
 /// # Core methods
 ///
-/// The core methods of futures, currently `poll`, `schedule`, and `tailcall`,
-/// are not intended to be called in general. These are used to drive an entire
-/// task of many futures composed together only from the top level.
+/// The core methods of futures, currently `poll`, and `schedule`, are not
+/// intended to be called in general. These are used to drive an entire task of
+/// many futures composed together only from the top level.
 ///
 /// More documentation can be found on each method about what its purpose is,
 /// but in general all of the combinators are the main methods that should be
@@ -356,59 +355,17 @@ pub trait Future: 'static {
     ///
     /// # Panics
     ///
-    /// Once a future has returned `Poll::Ok` or `Poll::Err` (it's been completed)
-    /// the future calls to either `poll` or this function, `schedule`, should not
-    /// be expected to behave well. A call to `schedule` after a poll has succeeded
-    /// may panic, block forever, or otherwise exhibit odd behavior.
+    /// Once a future has returned `Poll::Ok` or `Poll::Err` (it's been
+    /// completed) the future calls to either `poll` or this function,
+    /// `schedule`, should not be expected to behave well. A call to `schedule`
+    /// after a poll has succeeded may panic, block forever, or otherwise
+    /// exhibit odd behavior.
     ///
     /// Callers who may call `schedule` after a future is finished may want to
     /// consider using the `fuse` adaptor which defines the behavior of
     /// `schedule` after a successful poll, but comes with a little bit of
     /// extra cost.
     fn schedule(&mut self, task: &mut Task);
-
-    /// Perform tail-call optimization on this future.
-    ///
-    /// A particular future may actually represent a large tree of computation,
-    /// the structure of which can be optimized periodically after some of the
-    /// work has completed. This function is intended to be called after an
-    /// unsuccessful `poll` to ensure that the computation graph of a future
-    /// remains at a reasonable size.
-    ///
-    /// This function is intended to be idempotent. If `None` is returned then
-    /// the internal structure may have been optimized, but this future itself
-    /// must stick around to represent the computation at hand.
-    ///
-    /// If `Some` is returned then the returned future will be realized with the
-    /// same value that this future *would* have been had this method not been
-    /// called. Essentially, if `Some` is returned, then this future can be
-    /// forgotten and instead the returned value is used.
-    ///
-    /// Note that this is a default method which returns `None`, but any future
-    /// adaptor should implement it to flatten the underlying future, if any.
-    ///
-    /// # Unsafety
-    ///
-    /// Note that this is an `unsafe` trait method, primarily because it is
-    /// intended to be unsafe to implement. Implementors of this trait typically
-    /// don't need to worry about implementing this method as it defaults to
-    /// `None`.
-    ///
-    /// The return value of this trait `Box<Future>`, does not imply whether the
-    /// underlying type is indeed `Send`. This can be critically important for
-    /// futures, and is often necessary for transmitting through the bound. The
-    /// unsafe portion of this method relies on one core assumption: all
-    /// combinators assume that if a future is `Send` then the value returned by
-    /// `tailcall` **is also `Send`**, despite the type system saying otherwise.
-    ///
-    /// The default implementation for this function is to return `None`, which
-    /// is safe, but if types implement this then they need to be sure that the
-    /// returned value has the same `Send`/`Sync` properties as the implementor
-    /// itself.
-    unsafe fn tailcall(&mut self)
-                       -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
-        None
-    }
 
     /// Convenience function for turning this future into a trait object.
     ///

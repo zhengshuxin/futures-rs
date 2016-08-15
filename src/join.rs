@@ -3,7 +3,6 @@
 use std::mem;
 
 use {Future, Task, Poll, IntoFuture};
-use util::Collapsed;
 
 macro_rules! generate {
     ($(($Join:ident, $new:ident, <A, $($B:ident),*>),)*) => ($(
@@ -23,8 +22,6 @@ macro_rules! generate {
             where A: Future,
                   $($B: Future<Error=A::Error>),*
         {
-            let a = Collapsed::Start(a);
-            $(let $B = Collapsed::Start($B);)*
             $Join {
                 a: MaybeDone::NotYet(a),
                 $($B: MaybeDone::NotYet($B)),*
@@ -83,13 +80,6 @@ macro_rules! generate {
                     }
                 )*
             }
-
-            unsafe fn tailcall(&mut self)
-                               -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
-                self.a.collapse();
-                $(self.$B.collapse();)*
-                None
-            }
         }
 
         impl<A, $($B),*> IntoFuture for (A, $($B),*)
@@ -125,7 +115,7 @@ generate! {
 }
 
 enum MaybeDone<A: Future> {
-    NotYet(Collapsed<A>),
+    NotYet(A),
     Done(A::Item),
     Gone,
 }
@@ -151,12 +141,6 @@ impl<A: Future> MaybeDone<A> {
         match mem::replace(self, MaybeDone::Gone) {
             MaybeDone::Done(a) => a,
             _ => panic!(),
-        }
-    }
-
-    unsafe fn collapse(&mut self) {
-        if let MaybeDone::NotYet(ref mut a) = *self {
-            a.collapse()
         }
     }
 }

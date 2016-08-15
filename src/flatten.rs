@@ -36,9 +36,4 @@ impl<A> Future for Flatten<A>
     fn schedule(&mut self, task: &mut Task) {
         self.state.schedule(task)
     }
-
-    unsafe fn tailcall(&mut self)
-                       -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
-        self.state.tailcall()
-    }
 }

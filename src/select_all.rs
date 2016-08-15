@@ -1,7 +1,6 @@
 use std::mem;
 
-use {Future, IntoFuture, Task, empty, Poll};
-use util::Collapsed;
+use {Future, IntoFuture, Task, Poll};
 
 /// Future for the `select_all` combinator, waiting for one of any of a list of
 /// futures to complete.
@@ -16,7 +15,7 @@ pub struct SelectAll<A> where A: Future {
 /// This sentinel future represents the completion of the remaining futures in a
 /// list of futures.
 pub struct SelectAllNext<A> where A: Future {
-    inner: Collapsed<A>,
+    inner: A,
 }
 
 /// Creates a new future which will select over a list of futures.
@@ -36,7 +35,6 @@ pub fn select_all<I>(iter: I) -> SelectAll<<I::Item as IntoFuture>::Future>
     let ret = SelectAll {
         inner: iter.into_iter()
                    .map(|a| a.into_future())
-                   .map(Collapsed::Start)
                    .map(|a| SelectAllNext { inner: a })
                    .collect(),
     };
@@ -76,14 +74,6 @@ impl<A> Future for SelectAll<A>
             f.inner.schedule(task);
         }
     }
-
-    unsafe fn tailcall(&mut self)
-                       -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
-        for f in self.inner.iter_mut() {
-            f.inner.collapse();
-        }
-        None
-    }
 }
 
 impl<A> Future for SelectAllNext<A>
@@ -98,16 +88,5 @@ impl<A> Future for SelectAllNext<A>
 
     fn schedule(&mut self, task: &mut Task) {
         self.inner.schedule(task)
-    }
-
-    unsafe fn tailcall(&mut self)
-                       -> Option<Box<Future<Item=Self::Item, Error=Self::Error>>> {
-        self.inner.collapse();
-        match self.inner {
-            Collapsed::Tail(ref mut a) => {
-                Some(mem::replace(a, Box::new(empty())))
-            }
-            _ => None,
-        }
     }
 }
