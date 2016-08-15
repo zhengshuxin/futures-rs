@@ -64,7 +64,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
-use BoxFuture;
+use {BoxFuture, Future};
 use executor::{DEFAULT, Executor};
 use slot::Slot;
 
@@ -87,9 +87,9 @@ use slot::Slot;
 ///
 /// This structure is likely to expand more customizable functionality over
 /// time! That is, it's not quite done yet...
-pub struct Task {
-    handle: TaskHandle,
-    poll_requests: Vec<Arc<Executor>>,
+pub struct Task<'a> {
+    handle: TaskHandle<'a>,
+    poll_requests: Vec<Arc<Executor<'a>>>,
 
     // A `Task` is not `Sync`, see the docs above.
     _marker: marker::PhantomData<Cell<()>>,
@@ -99,12 +99,12 @@ pub struct Task {
 ///
 /// Created by the `Task::handle` method.
 #[derive(Clone)]
-pub struct TaskHandle {
-    inner: Arc<Inner>,
+pub struct TaskHandle<'a> {
+    inner: Arc<Inner<'a>>,
 }
 
-struct Inner {
-    slot: Slot<(Task, BoxFuture<(), ()>)>,
+struct Inner<'a> {
+    slot: Slot<(Task<'a>, Box<Future<Item=(), Error=()> + Send + 'a>)>,
     registered: AtomicBool,
 }
 
@@ -121,9 +121,9 @@ pub struct TaskData<A> {
 unsafe impl<A: Send> Send for TaskData<A> {}
 unsafe impl<A: Sync> Sync for TaskData<A> {}
 
-impl Task {
+impl<'a> Task<'a> {
     /// Creates a new task ready to drive a future.
-    pub fn new() -> Task {
+    pub fn new() -> Task<'a> {
         Task {
             poll_requests: Vec::new(),
             handle: TaskHandle {
@@ -239,7 +239,7 @@ impl Task {
     ///
     /// Note that if data is immediately ready then the `Task::notify` method
     /// should be preferred.
-    pub fn handle(&self) -> &TaskHandle {
+    pub fn handle(&self) -> &TaskHandle<'a> {
         &self.handle
     }
 
@@ -257,10 +257,10 @@ impl Task {
     /// the executor provided in a "prompt" fashion, that is there shohuldn't be
     /// a long blocking pause between a call to this and when a future is polled
     /// on the executor.
-    pub fn poll_on(&mut self, executor: Arc<Executor>) {
-        let poll_on = &*executor as *const Executor;
+    pub fn poll_on(&mut self, executor: Arc<Executor<'a>>) {
+        let poll_on = &*executor as *const Executor<'a>;
         for exe in self.poll_requests.iter() {
-            let exe = &*exe as *const Executor;
+            let exe = &**exe as *const Executor<'a>;
             if poll_on == exe {
                 return
             }
@@ -290,7 +290,7 @@ impl Task {
     ///
     /// Currently, if `poll` panics, then this method will propagate the panic
     /// to the thread that `poll` was called on. This is bad and it will change.
-    pub fn run(self, mut future: BoxFuture<(), ()>) {
+    pub fn run(self, mut future: Box<Future<Item=(), Error=()> + Send + 'a>) {
         let mut me = self;
 
         // First up, poll the future, but do so in a `catch_unwind` to ensure
@@ -336,19 +336,19 @@ impl Task {
 }
 
 fn catch_unwind<F, U>(f: F) -> thread::Result<U>
-    where F: FnOnce() -> U + Send + 'static,
+    where F: FnOnce() -> U + Send, // TODO: needs 'static
 {
     panic::catch_unwind(panic::AssertUnwindSafe(f))
 }
 
-impl TaskHandle {
+impl<'a> TaskHandle<'a> {
     /// Returns whether this task handle and another point to the same task.
     ///
     /// In other words, this method returns whether `notify` would end up
     /// notifying the same task. If two task handles need to be notified but
     /// they are equivalent, then only one needs to be actually notified.
-    pub fn equivalent(&self, other: &TaskHandle) -> bool {
-        &*self.inner as *const _ == &*other.inner as *const _
+    pub fn equivalent<'b>(&self, other: &TaskHandle<'b>) -> bool {
+        &*self.inner as *const _ as usize == &*other.inner as *const _ as usize
     }
 
     /// Notify the associated task that a future is ready to get polled.

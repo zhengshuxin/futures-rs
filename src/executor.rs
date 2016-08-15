@@ -10,14 +10,14 @@ use std::sync::Arc;
 ///
 /// This trait is object safe and intended to be used through pointers like
 /// `Box` and `Arc`.
-pub trait Executor: Send + Sync + 'static {
+pub trait Executor<'a>: Send + Sync + 'static {
     /// Executes the given closure `f`, perhaps on a different thread or
     /// deferred to a later time.
     ///
     /// This method may not execute `f` immediately, but it will arrange for the
     /// callback to be invoked "in the near future".
     fn execute<F>(&self, f: F)
-        where F: FnOnce() + Send + 'static,
+        where F: FnOnce() + Send + 'a,
               Self: Sized
     {
         self.execute_boxed(Box::new(f))
@@ -27,31 +27,35 @@ pub trait Executor: Send + Sync + 'static {
     /// objects.
     ///
     /// This should not be called direclty and instead `execute` should be used.
-    fn execute_boxed(&self, f: Box<ExecuteCallback>);
+    fn execute_boxed(&self, f: Box<ExecuteCallback + 'a>);
 }
 
 /// The default executor, used by futures by default currently.
 pub static DEFAULT: Limited = Limited;
 
-impl<T: Executor + ?Sized + Send + Sync + 'static> Executor for Box<T> {
-    fn execute_boxed(&self, f: Box<ExecuteCallback>) {
+impl<'a, T: ?Sized> Executor<'a> for Box<T>
+    where T: Executor<'a> + Send + Sync + 'static
+{
+    fn execute_boxed(&self, f: Box<ExecuteCallback + 'a>) {
         (**self).execute_boxed(f)
     }
 }
 
-impl<T: Executor + ?Sized + Send + Sync + 'static> Executor for Arc<T> {
-    fn execute_boxed(&self, f: Box<ExecuteCallback>) {
+impl<'a, T: ?Sized> Executor<'a> for Arc<T>
+    where T: Executor<'a> + Send + Sync + 'static
+{
+    fn execute_boxed(&self, f: Box<ExecuteCallback + 'a>) {
         (**self).execute_boxed(f)
     }
 }
 
 /// Essentially `Box<FnOnce() + Send>`, just as a trait.
-pub trait ExecuteCallback: Send + 'static {
+pub trait ExecuteCallback: Send {
     #[allow(missing_docs)]
     fn call(self: Box<Self>);
 }
 
-impl<F: FnOnce() + Send + 'static> ExecuteCallback for F {
+impl<F: FnOnce() + Send> ExecuteCallback for F {
     fn call(self: Box<F>) {
         (*self)()
     }
@@ -61,12 +65,12 @@ impl<F: FnOnce() + Send + 'static> ExecuteCallback for F {
 /// as soon as it's passed in.
 pub struct Inline;
 
-impl Executor for Inline {
-    fn execute<F: FnOnce() + Send + 'static>(&self, f: F) {
+impl<'a> Executor<'a> for Inline {
+    fn execute<F: FnOnce() + Send + 'a>(&self, f: F) {
         f()
     }
 
-    fn execute_boxed(&self, f: Box<ExecuteCallback>) {
+    fn execute_boxed(&self, f: Box<ExecuteCallback + 'a>) {
         f.call()
     }
 }
@@ -84,11 +88,12 @@ struct LimitState {
     deferred: RefCell<Vec<Box<ExecuteCallback>>>,
 }
 
-impl Executor for Limited {
+impl<'a> Executor<'a> for Limited {
+    // TODO: this can't be 'static
     fn execute<F>(&self, f: F) where F: FnOnce() + Send + 'static {
         LIMITED.with(|state| state.execute(f))
     }
-    fn execute_boxed(&self, f: Box<ExecuteCallback>) {
+    fn execute_boxed(&self, f: Box<ExecuteCallback + 'a>) {
         self.execute(|| f.call());
     }
 }

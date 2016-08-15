@@ -209,7 +209,7 @@ pub use select_all::{SelectAll, SelectAllNext, select_all};
 pub use then::Then;
 
 // streams
-pub mod stream;
+// pub mod stream;
 
 // impl details
 mod chain;
