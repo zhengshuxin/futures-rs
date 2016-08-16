@@ -8,30 +8,30 @@ use slot::{Slot, Token};
 /// memory.
 ///
 /// This is created by the `oneshot` function.
-pub struct Oneshot<T>
-    where T: Send + 'static,
+pub struct Oneshot<'a, T>
+    where T: Send + 'a,
 {
-    inner: Arc<Inner<T>>,
+    inner: Arc<Inner<'a, T>>,
     cancel_token: Option<Token>,
 }
 
 #[doc(hidden)]
 #[deprecated(note = "renamed to `oneshot`")]
-pub type Promise<T> = Oneshot<T>;
+pub type Promise<T> = Oneshot<'static, T>;
 
 /// Represents the completion half of a oneshot through which the result of a
 /// computation is signaled.
 ///
 /// This is created by the `oneshot` function.
-pub struct Complete<T>
-    where T: Send + 'static,
+pub struct Complete<'a, T>
+    where T: Send + 'a,
 {
-    inner: Arc<Inner<T>>,
+    inner: Arc<Inner<'a, T>>,
     completed: bool,
 }
 
-struct Inner<T> {
-    slot: Slot<Option<T>>,
+struct Inner<'a, T> {
+    slot: Slot<'a, Option<T>>,
     pending_wake: AtomicBool,
 }
 
@@ -61,8 +61,8 @@ struct Inner<T> {
 ///
 /// c.complete(3);
 /// ```
-pub fn oneshot<T>() -> (Complete<T>, Oneshot<T>)
-    where T: Send + 'static,
+pub fn oneshot<'a, T>() -> (Complete<'a, T>, Oneshot<'a, T>)
+    where T: Send + 'a,
 {
     let inner = Arc::new(Inner {
         slot: Slot::new(None),
@@ -81,14 +81,14 @@ pub fn oneshot<T>() -> (Complete<T>, Oneshot<T>)
 
 #[doc(hidden)]
 #[deprecated(note = "renamed to `oneshot`")]
-pub fn promise<T>() -> (Complete<T>, Oneshot<T>)
+pub fn promise<T>() -> (Complete<'static, T>, Oneshot<'static, T>)
     where T: Send + 'static,
 {
     oneshot()
 }
 
-impl<T> Complete<T>
-    where T: Send + 'static,
+impl<'b, T> Complete<'b, T>
+    where T: Send + 'b,
 {
     /// Completes this oneshot with a successful result.
     ///
@@ -110,8 +110,8 @@ impl<T> Complete<T>
     }
 }
 
-impl<T> Drop for Complete<T>
-    where T: Send + 'static,
+impl<'b, T> Drop for Complete<'b, T>
+    where T: Send + 'b,
 {
     fn drop(&mut self) {
         if !self.completed {
@@ -125,11 +125,13 @@ impl<T> Drop for Complete<T>
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Canceled;
 
-impl<T: Send + 'static> Future for Oneshot<T> {
+impl<'b, T: Send + 'b> Future for Oneshot<'b, T> {
     type Item = T;
     type Error = Canceled;
 
-    fn poll(&mut self, _: &mut Task) -> Poll<T, Canceled> {
+    fn poll<'a>(&mut self, _: &mut Task<'a>) -> Poll<T, Canceled>
+        where Self: 'a,
+    {
         if self.inner.pending_wake.load(Ordering::SeqCst) {
             return Poll::NotReady
         }
@@ -140,7 +142,9 @@ impl<T: Send + 'static> Future for Oneshot<T> {
         }
     }
 
-    fn schedule(&mut self, task: &mut Task) {
+    fn schedule<'a>(&mut self, task: &mut Task<'a>)
+        where Self: 'a,
+    {
         if self.inner.pending_wake.load(Ordering::SeqCst) {
             if let Some(cancel_token) = self.cancel_token.take() {
                 self.inner.slot.cancel(cancel_token);
@@ -156,8 +160,8 @@ impl<T: Send + 'static> Future for Oneshot<T> {
     }
 }
 
-impl<T> Drop for Oneshot<T>
-    where T: Send + 'static,
+impl<'b, T> Drop for Oneshot<'b, T>
+    where T: Send + 'b,
 {
     fn drop(&mut self) {
         if let Some(cancel_token) = self.cancel_token.take() {

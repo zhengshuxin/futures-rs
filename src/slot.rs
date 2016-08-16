@@ -41,7 +41,7 @@ use lock::Lock;
 /// started running can be canceled. Canceling a callback that has already run
 /// is not an error, and `cancel` does not signal whether or not the callback
 /// was actually canceled to the caller.
-pub struct Slot<T> {
+pub struct Slot<'a, T> {
     // The purpose of this data type is to communicate when a value becomes
     // available and coordinate between a producer and consumer about that
     // value. Slots end up being at the core of many futures as they handle
@@ -60,8 +60,8 @@ pub struct Slot<T> {
     // inspection (see below).
     state: AtomicUsize,
     slot: Lock<Option<T>>,
-    on_full: Lock<Option<Box<FnBox<T>>>>,
-    on_empty: Lock<Option<Box<FnBox<T>>>>,
+    on_full: Lock<Option<Box<FnBox<T> + 'a>>>,
+    on_empty: Lock<Option<Box<FnBox<T> + 'a>>>,
 }
 
 /// Error value returned from erroneous calls to `try_produce`, which contains
@@ -109,10 +109,10 @@ fn _assert() {
     _is_sync::<Slot<u32>>();
 }
 
-impl<T> Slot<T> {
+impl<'a, T> Slot<'a, T> {
     /// Creates a new `Slot` containing `val`, which may be `None` to create an
     /// empty `Slot`.
-    pub fn new(val: Option<T>) -> Slot<T> {
+    pub fn new(val: Option<T>) -> Slot<'a, T> {
         Slot {
             state: AtomicUsize::new(if val.is_some() {DATA} else {0}),
             slot: Lock::new(val),
@@ -205,7 +205,7 @@ impl<T> Slot<T> {
     /// `on_full`, or if this value is called concurrently with other producer
     /// methods.
     pub fn on_empty<F>(&self, f: F) -> Token
-        where F: FnOnce(&Slot<T>) + Send + 'static
+        where F: FnOnce(&Slot<T>) + Send + 'a
     {
         // First up, as usual, take a look at our state. Of the three flags we
         // check two:
@@ -324,7 +324,7 @@ impl<T> Slot<T> {
     /// Panics if another callback was already registered via `on_empty` or
     /// `on_full` or if called concurrently with `on_full` or `try_consume`.
     pub fn on_full<F>(&self, f: F) -> Token
-        where F: FnOnce(&Slot<T>) + Send + 'static
+        where F: FnOnce(&Slot<T>) + Send + 'a
     {
         // The implementation of this method is basically the same as
         // `on_empty` above, it's just the opposite of all the operations.

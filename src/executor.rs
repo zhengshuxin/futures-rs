@@ -10,7 +10,7 @@ use std::sync::Arc;
 ///
 /// This trait is object safe and intended to be used through pointers like
 /// `Box` and `Arc`.
-pub trait Executor<'a>: Send + Sync + 'static {
+pub trait Executor<'a>: Send + Sync {
     /// Executes the given closure `f`, perhaps on a different thread or
     /// deferred to a later time.
     ///
@@ -34,7 +34,7 @@ pub trait Executor<'a>: Send + Sync + 'static {
 pub static DEFAULT: Limited = Limited;
 
 impl<'a, T: ?Sized> Executor<'a> for Box<T>
-    where T: Executor<'a> + Send + Sync + 'static
+    where T: Executor<'a> + Send + Sync
 {
     fn execute_boxed(&self, f: Box<ExecuteCallback + 'a>) {
         (**self).execute_boxed(f)
@@ -42,7 +42,7 @@ impl<'a, T: ?Sized> Executor<'a> for Box<T>
 }
 
 impl<'a, T: ?Sized> Executor<'a> for Arc<T>
-    where T: Executor<'a> + Send + Sync + 'static
+    where T: Executor<'a> + Send + Sync
 {
     fn execute_boxed(&self, f: Box<ExecuteCallback + 'a>) {
         (**self).execute_boxed(f)

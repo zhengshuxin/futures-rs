@@ -104,7 +104,7 @@ pub struct TaskHandle<'a> {
 }
 
 struct Inner<'a> {
-    slot: Slot<(Task<'a>, Box<Future<Item=(), Error=()> + Send + 'a>)>,
+    slot: Slot<'static, (Task<'a>, Box<Future<Item=(), Error=()> + Send + 'a>)>,
     registered: AtomicBool,
 }
 

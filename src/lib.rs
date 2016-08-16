@@ -168,53 +168,53 @@ pub use task::{Task, TaskData, TaskHandle};
 pub mod executor;
 
 // Primitive futures
-mod collect;
-mod done;
-mod empty;
-mod failed;
-mod finished;
-mod lazy;
+// mod collect;
+// mod done;
+// mod empty;
+// mod failed;
+// mod finished;
+// mod lazy;
 mod oneshot;
-mod store;
-pub use collect::{collect, Collect};
-pub use done::{done, Done};
-pub use empty::{empty, Empty};
-pub use failed::{failed, Failed};
-pub use finished::{finished, Finished};
-pub use lazy::{lazy, Lazy};
+// mod store;
+// pub use collect::{collect, Collect};
+// pub use done::{done, Done};
+// pub use empty::{empty, Empty};
+// pub use failed::{failed, Failed};
+// pub use finished::{finished, Finished};
+// pub use lazy::{lazy, Lazy};
 #[allow(deprecated)]
 pub use oneshot::{oneshot, promise, Oneshot, Promise, Complete, Canceled};
-pub use store::{store, Store};
+// pub use store::{store, Store};
 
 // combinators
-mod and_then;
-mod flatten;
-mod fuse;
-mod join;
-mod map;
-mod map_err;
-mod or_else;
-mod select;
-mod select_all;
-mod then;
-pub use and_then::AndThen;
-pub use flatten::Flatten;
-pub use fuse::Fuse;
-pub use join::{Join, Join3, Join4, Join5};
-pub use map::Map;
-pub use map_err::MapErr;
-pub use or_else::OrElse;
-pub use select::{Select, SelectNext};
-pub use select_all::{SelectAll, SelectAllNext, select_all};
-pub use then::Then;
+// mod and_then;
+// mod flatten;
+// mod fuse;
+// mod join;
+// mod map;
+// mod map_err;
+// mod or_else;
+// mod select;
+// mod select_all;
+// mod then;
+// pub use and_then::AndThen;
+// pub use flatten::Flatten;
+// pub use fuse::Fuse;
+// pub use join::{Join, Join3, Join4, Join5};
+// pub use map::Map;
+// pub use map_err::MapErr;
+// pub use or_else::OrElse;
+// pub use select::{Select, SelectNext};
+// pub use select_all::{SelectAll, SelectAllNext, select_all};
+// pub use then::Then;
 
 // streams
 // pub mod stream;
 
 // impl details
-mod chain;
+// mod chain;
 mod impls;
-mod forget;
+// mod forget;
 
 /// Trait for types which represent a placeholder of a value that will become
 /// available at possible some later point in time.
@@ -318,7 +318,8 @@ pub trait Future {
     /// This future may have failed to finish the computation, in which case
     /// the `Poll::Err` variant will be returned with an appropriate payload of
     /// an error.
-    fn poll(&mut self, task: &mut Task) -> Poll<Self::Item, Self::Error>;
+    fn poll<'a>(&mut self, task: &mut Task<'a>) -> Poll<Self::Item, Self::Error>
+        where Self: 'a;
 
     /// Schedule a task to be notified when this future is ready.
     ///
@@ -365,7 +366,8 @@ pub trait Future {
     /// consider using the `fuse` adaptor which defines the behavior of
     /// `schedule` after a successful poll, but comes with a little bit of
     /// extra cost.
-    fn schedule(&mut self, task: &mut Task);
+    fn schedule<'a>(&mut self, task: &mut Task<'a>)
+        where Self: 'a;
 
     /// Convenience function for turning this future into a trait object.
     ///
@@ -388,402 +390,402 @@ pub trait Future {
         Box::new(self)
     }
 
-    /// Map this future's result to a different type, returning a new future of
-    /// the resulting type.
-    ///
-    /// This function is similar to the `Option::map` or `Iterator::map` where
-    /// it will change the type of the underlying future. This is useful to
-    /// chain along a computation once a future has been resolved.
-    ///
-    /// The closure provided will only be called if this future is resolved
-    /// successfully. If this future returns an error, panics, or is canceled,
-    /// then the closure provided will never be invoked.
-    ///
-    /// Note that this function consumes the receiving future and returns a
-    /// wrapped version of it, similar to the existing `map` methods in the
-    /// standard library.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use futures::*;
-    ///
-    /// let future_of_1 = finished::<u32, u32>(1);
-    /// let future_of_4 = future_of_1.map(|x| x + 3);
-    /// ```
-    fn map<F, U>(self, f: F) -> Map<Self, F>
-        where F: FnOnce(Self::Item) -> U,
-              Self: Sized,
-    {
-        assert_future::<U, Self::Error, _>(map::new(self, f))
-    }
-
-    /// Map this future's error to a different error, returning a new future.
-    ///
-    /// This function is similar to the `Result::map_err` where it will change
-    /// the error type of the underlying future. This is useful for example to
-    /// ensure that futures have the same error type when used with combinators
-    /// like `select` and `join`.
-    ///
-    /// The closure provided will only be called if this future is resolved
-    /// with an error. If this future returns a success, panics, or is
-    /// canceled, then the closure provided will never be invoked.
-    ///
-    /// Note that this function consumes the receiving future and returns a
-    /// wrapped version of it.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use futures::*;
-    ///
-    /// let future_of_err_1 = failed::<u32, u32>(1);
-    /// let future_of_err_4 = future_of_err_1.map_err(|x| x + 3);
-    /// ```
-    fn map_err<F, E>(self, f: F) -> MapErr<Self, F>
-        where F: FnOnce(Self::Error) -> E,
-              Self: Sized,
-    {
-        assert_future::<Self::Item, E, _>(map_err::new(self, f))
-    }
-
-    /// Chain on a computation for when a future finished, passing the result of
-    /// the future to the provided closure `f`.
-    ///
-    /// This function can be used to ensure a computation runs regardless of
-    /// the conclusion of the future. The closure provided will be yielded a
-    /// `Result` once the future is complete.
-    ///
-    /// The returned value of the closure must implement the `IntoFuture` trait
-    /// and can represent some more work to be done before the composed future
-    /// is finished. Note that the `Result` type implements the `IntoFuture`
-    /// trait so it is possible to simply alter the `Result` yielded to the
-    /// closure and return it.
-    ///
-    /// If this future is canceled or panics then the closure `f` will not be
-    /// run.
-    ///
-    /// Note that this function consumes the receiving future and returns a
-    /// wrapped version of it.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use futures::*;
-    ///
-    /// let future_of_1 = finished::<u32, u32>(1);
-    /// let future_of_4 = future_of_1.then(|x| {
-    ///     x.map(|y| y + 3)
-    /// });
-    ///
-    /// let future_of_err_1 = failed::<u32, u32>(1);
-    /// let future_of_4 = future_of_err_1.then(|x| {
-    ///     match x {
-    ///         Ok(_) => panic!("expected an error"),
-    ///         Err(y) => finished::<u32, u32>(y + 3),
-    ///     }
-    /// });
-    /// ```
-    fn then<F, B>(self, f: F) -> Then<Self, B, F>
-        where F: FnOnce(Result<Self::Item, Self::Error>) -> B,
-              B: IntoFuture,
-              Self: Sized,
-    {
-        assert_future::<B::Item, B::Error, _>(then::new(self, f))
-    }
-
-    /// Execute another future after this one has resolved successfully.
-    ///
-    /// This function can be used to chain two futures together and ensure that
-    /// the final future isn't resolved until both have finished. The closure
-    /// provided is yielded the successful result of this future and returns
-    /// another value which can be converted into a future.
-    ///
-    /// Note that because `Result` implements the `IntoFuture` trait this method
-    /// can also be useful for chaining fallible and serial computations onto
-    /// the end of one future.
-    ///
-    /// If this future is canceled, panics, or completes with an error then the
-    /// provided closure `f` is never called.
-    ///
-    /// Note that this function consumes the receiving future and returns a
-    /// wrapped version of it.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use futures::*;
-    ///
-    /// let future_of_1 = finished::<u32, u32>(1);
-    /// let future_of_4 = future_of_1.and_then(|x| {
-    ///     Ok(x + 3)
-    /// });
-    ///
-    /// let future_of_err_1 = failed::<u32, u32>(1);
-    /// future_of_err_1.and_then(|_| -> Done<u32, u32> {
-    ///     panic!("should not be called in case of an error");
-    /// });
-    /// ```
-    fn and_then<F, B>(self, f: F) -> AndThen<Self, B, F>
-        where F: FnOnce(Self::Item) -> B,
-              B: IntoFuture<Error = Self::Error>,
-              Self: Sized,
-    {
-        assert_future::<B::Item, Self::Error, _>(and_then::new(self, f))
-    }
-
-    /// Execute another future after this one has resolved with an error.
-    ///
-    /// This function can be used to chain two futures together and ensure that
-    /// the final future isn't resolved until both have finished. The closure
-    /// provided is yielded the error of this future and returns another value
-    /// which can be converted into a future.
-    ///
-    /// Note that because `Result` implements the `IntoFuture` trait this method
-    /// can also be useful for chaining fallible and serial computations onto
-    /// the end of one future.
-    ///
-    /// If this future is canceled, panics, or completes successfully then the
-    /// provided closure `f` is never called.
-    ///
-    /// Note that this function consumes the receiving future and returns a
-    /// wrapped version of it.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use futures::*;
-    ///
-    /// let future_of_err_1 = failed::<u32, u32>(1);
-    /// let future_of_4 = future_of_err_1.or_else(|x| -> Result<u32, u32> {
-    ///     Ok(x + 3)
-    /// });
-    ///
-    /// let future_of_1 = finished::<u32, u32>(1);
-    /// future_of_1.or_else(|_| -> Done<u32, u32> {
-    ///     panic!("should not be called in case of success");
-    /// });
-    /// ```
-    fn or_else<F, B>(self, f: F) -> OrElse<Self, B, F>
-        where F: FnOnce(Self::Error) -> B,
-              B: IntoFuture<Item = Self::Item>,
-              Self: Sized,
-    {
-        assert_future::<Self::Item, B::Error, _>(or_else::new(self, f))
-    }
-
-    /// Waits for either one of two futures to complete.
-    ///
-    /// This function will return a new future which awaits for either this or
-    /// the `other` future to complete. The returned future will finish with
-    /// both the value resolved and a future representing the completion of the
-    /// other work. Both futures must have the same item and error type.
-    ///
-    /// Note that this function consumes the receiving future and returns a
-    /// wrapped version of it.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use futures::*;
-    ///
-    /// // A poor-man's join implemented on top of select
-    ///
-    /// fn join<A>(a: A, b: A) -> BoxFuture<(u32, u32), u32>
-    ///     where A: Future<Item = u32, Error = u32> + Send,
-    /// {
-    ///     a.select(b).then(|res| {
-    ///         match res {
-    ///             Ok((a, b)) => b.map(move |b| (a, b)).boxed(),
-    ///             Err((a, _)) => failed(a).boxed(),
-    ///         }
-    ///     }).boxed()
-    /// }
-    /// ```
-    fn select<B>(self, other: B) -> Select<Self, B::Future>
-        where B: IntoFuture<Item=Self::Item, Error=Self::Error>,
-              Self: Sized,
-    {
-        let f = select::new(self, other.into_future());
-        assert_future::<(Self::Item, SelectNext<Self, B::Future>),
-                        (Self::Error, SelectNext<Self, B::Future>), _>(f)
-    }
-
-    /// Joins the result of two futures, waiting for them both to complete.
-    ///
-    /// This function will return a new future which awaits both this and the
-    /// `other` future to complete. The returned future will finish with a tuple
-    /// of both results.
-    ///
-    /// Both futures must have the same error type, and if either finishes with
-    /// an error then the other will be canceled and that error will be
-    /// returned.
-    ///
-    /// If either future is canceled or panics, the other is canceled and the
-    /// original error is propagated upwards.
-    ///
-    /// Note that this function consumes the receiving future and returns a
-    /// wrapped version of it.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use futures::*;
-    ///
-    /// let a = finished::<u32, u32>(1);
-    /// let b = finished::<u32, u32>(2);
-    /// let pair = a.join(b);
-    ///
-    /// pair.map(|(a, b)| {
-    ///     assert_eq!(a, 1);
-    ///     assert_eq!(b, 2);
-    /// });
-    /// ```
-    fn join<B>(self, other: B) -> Join<Self, B::Future>
-        where B: IntoFuture<Error=Self::Error>,
-              Self: Sized,
-    {
-        let f = join::new(self, other.into_future());
-        assert_future::<(Self::Item, B::Item), Self::Error, _>(f)
-    }
-
-    /// Same as `join`, but with more futures.
-    fn join3<B, C>(self, b: B, c: C) -> Join3<Self, B::Future, C::Future>
-        where B: IntoFuture<Error=Self::Error>,
-              C: IntoFuture<Error=Self::Error>,
-              Self: Sized,
-    {
-        join::new3(self, b.into_future(), c.into_future())
-    }
-
-    /// Same as `join`, but with more futures.
-    fn join4<B, C, D>(self, b: B, c: C, d: D)
-                      -> Join4<Self, B::Future, C::Future, D::Future>
-        where B: IntoFuture<Error=Self::Error>,
-              C: IntoFuture<Error=Self::Error>,
-              D: IntoFuture<Error=Self::Error>,
-              Self: Sized,
-    {
-        join::new4(self, b.into_future(), c.into_future(), d.into_future())
-    }
-
-    /// Same as `join`, but with more futures.
-    fn join5<B, C, D, E>(self, b: B, c: C, d: D, e: E)
-                         -> Join5<Self, B::Future, C::Future, D::Future, E::Future>
-        where B: IntoFuture<Error=Self::Error>,
-              C: IntoFuture<Error=Self::Error>,
-              D: IntoFuture<Error=Self::Error>,
-              E: IntoFuture<Error=Self::Error>,
-              Self: Sized,
-    {
-        join::new5(self, b.into_future(), c.into_future(), d.into_future(),
-                   e.into_future())
-    }
-
-    /// Flatten the execution of this future when the successful result of this
-    /// future is itself another future.
-    ///
-    /// This can be useful when combining futures together to flatten the
-    /// computation out the the final result. This method can only be called
-    /// when the successful result of this future itself implements the
-    /// `IntoFuture` trait and the error can be created from this future's error
-    /// type.
-    ///
-    /// This method is equivalent to `self.then(|x| x)`.
-    ///
-    /// Note that this function consumes the receiving future and returns a
-    /// wrapped version of it.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use futures::*;
-    ///
-    /// let future_of_a_future = finished::<_, u32>(finished::<u32, u32>(1));
-    /// let future_of_1 = future_of_a_future.flatten();
-    /// ```
-    fn flatten(self) -> Flatten<Self>
-        where Self::Item: IntoFuture,
-              <<Self as Future>::Item as IntoFuture>::Error:
-                    From<<Self as Future>::Error>,
-              Self: Sized
-    {
-        let f = flatten::new(self);
-        assert_future::<<<Self as Future>::Item as IntoFuture>::Item,
-                        <<Self as Future>::Item as IntoFuture>::Error,
-                        _>(f)
-    }
-
-    /// Fuse a future such that `poll` will never again be called once it has
-    /// completed.
-    ///
-    /// Currently once a future has returned `Poll::Ok` or `Poll::Err` from
-    /// `poll` any further calls could exhibit bad behavior such as blocking
-    /// forever, panicking, never returning, etc. If it is known that `poll`
-    /// may be called too often then this method can be used to ensure that it
-    /// has defined semantics.
-    ///
-    /// Once a future has been `fuse`d and it returns a completion from `poll`,
-    /// then it will forever return `Poll::NotReady` from `poll` again (never
-    /// resolve).  This, unlike the trait's `poll` method, is guaranteed.
-    ///
-    /// Additionally, once a future has completed, this `Fuse` combinator will
-    /// ensure that all registered callbacks will not be registered with the
-    /// underlying future.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use futures::*;
-    ///
-    /// let mut task = Task::new();
-    /// let mut future = finished::<i32, u32>(2);
-    /// assert!(future.poll(&mut task).is_ready());
-    ///
-    /// // Normally, a call such as this would panic:
-    /// //future.poll(&mut task);
-    ///
-    /// // This, however, is guaranteed to not panic
-    /// let mut future = finished::<i32, u32>(2).fuse();
-    /// assert!(future.poll(&mut task).is_ready());
-    /// assert!(future.poll(&mut task).is_not_ready());
-    /// ```
-    fn fuse(self) -> Fuse<Self>
-        where Self: Sized
-    {
-        let f = fuse::new(self);
-        assert_future::<Self::Item, Self::Error, _>(f)
-    }
-
-    /// Consume this future drive it to completion.
-    ///
-    /// This function is one of the primary methods of driving a future
-    /// forward, and is also one of the primary sources of concurrency in event
-    /// loops. This function will allocate a new `Task` to associate with this
-    /// future, and the task will be paired with the future until it is
-    /// completed.
-    ///
-    /// This method is also a convenient way of simply "spawning" a future into
-    /// the background. For example this is similar to the `ensure` method in
-    /// Python.
-    ///
-    /// # Bounds
-    ///
-    /// Note that this function requires the underlying future to be `Send`, but
-    /// not all futures may implement the `Send` bound. Additionally, the
-    /// underlying `Task` requires that the future is send to be driven to
-    /// completion.
-    ///
-    /// If your type is not `Send`, however, fear not! Most event loops will
-    /// provide an abstraction like `LoopData` in the `futures-mio` crate. This
-    /// allows a future to be "pinned" to an event loop, allowing its handle to
-    /// be `Send` while the underlying data itself is not `Send`.
-    ///
-    /// By using objects like `LoopData`, any future can become `Send` to use
-    /// this method to drive it to completion.
-    fn forget(self) where Self: Sized + Send + 'static {
-        forget::forget(self);
-    }
+    // /// Map this future's result to a different type, returning a new future of
+    // /// the resulting type.
+    // ///
+    // /// This function is similar to the `Option::map` or `Iterator::map` where
+    // /// it will change the type of the underlying future. This is useful to
+    // /// chain along a computation once a future has been resolved.
+    // ///
+    // /// The closure provided will only be called if this future is resolved
+    // /// successfully. If this future returns an error, panics, or is canceled,
+    // /// then the closure provided will never be invoked.
+    // ///
+    // /// Note that this function consumes the receiving future and returns a
+    // /// wrapped version of it, similar to the existing `map` methods in the
+    // /// standard library.
+    // ///
+    // /// # Examples
+    // ///
+    // /// ```
+    // /// use futures::*;
+    // ///
+    // /// let future_of_1 = finished::<u32, u32>(1);
+    // /// let future_of_4 = future_of_1.map(|x| x + 3);
+    // /// ```
+    // fn map<F, U>(self, f: F) -> Map<Self, F>
+    //     where F: FnOnce(Self::Item) -> U,
+    //           Self: Sized,
+    // {
+    //     assert_future::<U, Self::Error, _>(map::new(self, f))
+    // }
+    //
+    // /// Map this future's error to a different error, returning a new future.
+    // ///
+    // /// This function is similar to the `Result::map_err` where it will change
+    // /// the error type of the underlying future. This is useful for example to
+    // /// ensure that futures have the same error type when used with combinators
+    // /// like `select` and `join`.
+    // ///
+    // /// The closure provided will only be called if this future is resolved
+    // /// with an error. If this future returns a success, panics, or is
+    // /// canceled, then the closure provided will never be invoked.
+    // ///
+    // /// Note that this function consumes the receiving future and returns a
+    // /// wrapped version of it.
+    // ///
+    // /// # Examples
+    // ///
+    // /// ```
+    // /// use futures::*;
+    // ///
+    // /// let future_of_err_1 = failed::<u32, u32>(1);
+    // /// let future_of_err_4 = future_of_err_1.map_err(|x| x + 3);
+    // /// ```
+    // fn map_err<F, E>(self, f: F) -> MapErr<Self, F>
+    //     where F: FnOnce(Self::Error) -> E,
+    //           Self: Sized,
+    // {
+    //     assert_future::<Self::Item, E, _>(map_err::new(self, f))
+    // }
+    //
+    // /// Chain on a computation for when a future finished, passing the result of
+    // /// the future to the provided closure `f`.
+    // ///
+    // /// This function can be used to ensure a computation runs regardless of
+    // /// the conclusion of the future. The closure provided will be yielded a
+    // /// `Result` once the future is complete.
+    // ///
+    // /// The returned value of the closure must implement the `IntoFuture` trait
+    // /// and can represent some more work to be done before the composed future
+    // /// is finished. Note that the `Result` type implements the `IntoFuture`
+    // /// trait so it is possible to simply alter the `Result` yielded to the
+    // /// closure and return it.
+    // ///
+    // /// If this future is canceled or panics then the closure `f` will not be
+    // /// run.
+    // ///
+    // /// Note that this function consumes the receiving future and returns a
+    // /// wrapped version of it.
+    // ///
+    // /// # Examples
+    // ///
+    // /// ```
+    // /// use futures::*;
+    // ///
+    // /// let future_of_1 = finished::<u32, u32>(1);
+    // /// let future_of_4 = future_of_1.then(|x| {
+    // ///     x.map(|y| y + 3)
+    // /// });
+    // ///
+    // /// let future_of_err_1 = failed::<u32, u32>(1);
+    // /// let future_of_4 = future_of_err_1.then(|x| {
+    // ///     match x {
+    // ///         Ok(_) => panic!("expected an error"),
+    // ///         Err(y) => finished::<u32, u32>(y + 3),
+    // ///     }
+    // /// });
+    // /// ```
+    // fn then<F, B>(self, f: F) -> Then<Self, B, F>
+    //     where F: FnOnce(Result<Self::Item, Self::Error>) -> B,
+    //           B: IntoFuture,
+    //           Self: Sized,
+    // {
+    //     assert_future::<B::Item, B::Error, _>(then::new(self, f))
+    // }
+    //
+    // /// Execute another future after this one has resolved successfully.
+    // ///
+    // /// This function can be used to chain two futures together and ensure that
+    // /// the final future isn't resolved until both have finished. The closure
+    // /// provided is yielded the successful result of this future and returns
+    // /// another value which can be converted into a future.
+    // ///
+    // /// Note that because `Result` implements the `IntoFuture` trait this method
+    // /// can also be useful for chaining fallible and serial computations onto
+    // /// the end of one future.
+    // ///
+    // /// If this future is canceled, panics, or completes with an error then the
+    // /// provided closure `f` is never called.
+    // ///
+    // /// Note that this function consumes the receiving future and returns a
+    // /// wrapped version of it.
+    // ///
+    // /// # Examples
+    // ///
+    // /// ```
+    // /// use futures::*;
+    // ///
+    // /// let future_of_1 = finished::<u32, u32>(1);
+    // /// let future_of_4 = future_of_1.and_then(|x| {
+    // ///     Ok(x + 3)
+    // /// });
+    // ///
+    // /// let future_of_err_1 = failed::<u32, u32>(1);
+    // /// future_of_err_1.and_then(|_| -> Done<u32, u32> {
+    // ///     panic!("should not be called in case of an error");
+    // /// });
+    // /// ```
+    // fn and_then<F, B>(self, f: F) -> AndThen<Self, B, F>
+    //     where F: FnOnce(Self::Item) -> B,
+    //           B: IntoFuture<Error = Self::Error>,
+    //           Self: Sized,
+    // {
+    //     assert_future::<B::Item, Self::Error, _>(and_then::new(self, f))
+    // }
+    //
+    // /// Execute another future after this one has resolved with an error.
+    // ///
+    // /// This function can be used to chain two futures together and ensure that
+    // /// the final future isn't resolved until both have finished. The closure
+    // /// provided is yielded the error of this future and returns another value
+    // /// which can be converted into a future.
+    // ///
+    // /// Note that because `Result` implements the `IntoFuture` trait this method
+    // /// can also be useful for chaining fallible and serial computations onto
+    // /// the end of one future.
+    // ///
+    // /// If this future is canceled, panics, or completes successfully then the
+    // /// provided closure `f` is never called.
+    // ///
+    // /// Note that this function consumes the receiving future and returns a
+    // /// wrapped version of it.
+    // ///
+    // /// # Examples
+    // ///
+    // /// ```
+    // /// use futures::*;
+    // ///
+    // /// let future_of_err_1 = failed::<u32, u32>(1);
+    // /// let future_of_4 = future_of_err_1.or_else(|x| -> Result<u32, u32> {
+    // ///     Ok(x + 3)
+    // /// });
+    // ///
+    // /// let future_of_1 = finished::<u32, u32>(1);
+    // /// future_of_1.or_else(|_| -> Done<u32, u32> {
+    // ///     panic!("should not be called in case of success");
+    // /// });
+    // /// ```
+    // fn or_else<F, B>(self, f: F) -> OrElse<Self, B, F>
+    //     where F: FnOnce(Self::Error) -> B,
+    //           B: IntoFuture<Item = Self::Item>,
+    //           Self: Sized,
+    // {
+    //     assert_future::<Self::Item, B::Error, _>(or_else::new(self, f))
+    // }
+    //
+    // /// Waits for either one of two futures to complete.
+    // ///
+    // /// This function will return a new future which awaits for either this or
+    // /// the `other` future to complete. The returned future will finish with
+    // /// both the value resolved and a future representing the completion of the
+    // /// other work. Both futures must have the same item and error type.
+    // ///
+    // /// Note that this function consumes the receiving future and returns a
+    // /// wrapped version of it.
+    // ///
+    // /// # Examples
+    // ///
+    // /// ```
+    // /// use futures::*;
+    // ///
+    // /// // A poor-man's join implemented on top of select
+    // ///
+    // /// fn join<A>(a: A, b: A) -> BoxFuture<(u32, u32), u32>
+    // ///     where A: Future<Item = u32, Error = u32> + Send,
+    // /// {
+    // ///     a.select(b).then(|res| {
+    // ///         match res {
+    // ///             Ok((a, b)) => b.map(move |b| (a, b)).boxed(),
+    // ///             Err((a, _)) => failed(a).boxed(),
+    // ///         }
+    // ///     }).boxed()
+    // /// }
+    // /// ```
+    // fn select<B>(self, other: B) -> Select<Self, B::Future>
+    //     where B: IntoFuture<Item=Self::Item, Error=Self::Error>,
+    //           Self: Sized,
+    // {
+    //     let f = select::new(self, other.into_future());
+    //     assert_future::<(Self::Item, SelectNext<Self, B::Future>),
+    //                     (Self::Error, SelectNext<Self, B::Future>), _>(f)
+    // }
+    //
+    // /// Joins the result of two futures, waiting for them both to complete.
+    // ///
+    // /// This function will return a new future which awaits both this and the
+    // /// `other` future to complete. The returned future will finish with a tuple
+    // /// of both results.
+    // ///
+    // /// Both futures must have the same error type, and if either finishes with
+    // /// an error then the other will be canceled and that error will be
+    // /// returned.
+    // ///
+    // /// If either future is canceled or panics, the other is canceled and the
+    // /// original error is propagated upwards.
+    // ///
+    // /// Note that this function consumes the receiving future and returns a
+    // /// wrapped version of it.
+    // ///
+    // /// # Examples
+    // ///
+    // /// ```
+    // /// use futures::*;
+    // ///
+    // /// let a = finished::<u32, u32>(1);
+    // /// let b = finished::<u32, u32>(2);
+    // /// let pair = a.join(b);
+    // ///
+    // /// pair.map(|(a, b)| {
+    // ///     assert_eq!(a, 1);
+    // ///     assert_eq!(b, 2);
+    // /// });
+    // /// ```
+    // fn join<B>(self, other: B) -> Join<Self, B::Future>
+    //     where B: IntoFuture<Error=Self::Error>,
+    //           Self: Sized,
+    // {
+    //     let f = join::new(self, other.into_future());
+    //     assert_future::<(Self::Item, B::Item), Self::Error, _>(f)
+    // }
+    //
+    // /// Same as `join`, but with more futures.
+    // fn join3<B, C>(self, b: B, c: C) -> Join3<Self, B::Future, C::Future>
+    //     where B: IntoFuture<Error=Self::Error>,
+    //           C: IntoFuture<Error=Self::Error>,
+    //           Self: Sized,
+    // {
+    //     join::new3(self, b.into_future(), c.into_future())
+    // }
+    //
+    // /// Same as `join`, but with more futures.
+    // fn join4<B, C, D>(self, b: B, c: C, d: D)
+    //                   -> Join4<Self, B::Future, C::Future, D::Future>
+    //     where B: IntoFuture<Error=Self::Error>,
+    //           C: IntoFuture<Error=Self::Error>,
+    //           D: IntoFuture<Error=Self::Error>,
+    //           Self: Sized,
+    // {
+    //     join::new4(self, b.into_future(), c.into_future(), d.into_future())
+    // }
+    //
+    // /// Same as `join`, but with more futures.
+    // fn join5<B, C, D, E>(self, b: B, c: C, d: D, e: E)
+    //                      -> Join5<Self, B::Future, C::Future, D::Future, E::Future>
+    //     where B: IntoFuture<Error=Self::Error>,
+    //           C: IntoFuture<Error=Self::Error>,
+    //           D: IntoFuture<Error=Self::Error>,
+    //           E: IntoFuture<Error=Self::Error>,
+    //           Self: Sized,
+    // {
+    //     join::new5(self, b.into_future(), c.into_future(), d.into_future(),
+    //                e.into_future())
+    // }
+    //
+    // /// Flatten the execution of this future when the successful result of this
+    // /// future is itself another future.
+    // ///
+    // /// This can be useful when combining futures together to flatten the
+    // /// computation out the the final result. This method can only be called
+    // /// when the successful result of this future itself implements the
+    // /// `IntoFuture` trait and the error can be created from this future's error
+    // /// type.
+    // ///
+    // /// This method is equivalent to `self.then(|x| x)`.
+    // ///
+    // /// Note that this function consumes the receiving future and returns a
+    // /// wrapped version of it.
+    // ///
+    // /// # Examples
+    // ///
+    // /// ```
+    // /// use futures::*;
+    // ///
+    // /// let future_of_a_future = finished::<_, u32>(finished::<u32, u32>(1));
+    // /// let future_of_1 = future_of_a_future.flatten();
+    // /// ```
+    // fn flatten(self) -> Flatten<Self>
+    //     where Self::Item: IntoFuture,
+    //           <<Self as Future>::Item as IntoFuture>::Error:
+    //                 From<<Self as Future>::Error>,
+    //           Self: Sized
+    // {
+    //     let f = flatten::new(self);
+    //     assert_future::<<<Self as Future>::Item as IntoFuture>::Item,
+    //                     <<Self as Future>::Item as IntoFuture>::Error,
+    //                     _>(f)
+    // }
+    //
+    // /// Fuse a future such that `poll` will never again be called once it has
+    // /// completed.
+    // ///
+    // /// Currently once a future has returned `Poll::Ok` or `Poll::Err` from
+    // /// `poll` any further calls could exhibit bad behavior such as blocking
+    // /// forever, panicking, never returning, etc. If it is known that `poll`
+    // /// may be called too often then this method can be used to ensure that it
+    // /// has defined semantics.
+    // ///
+    // /// Once a future has been `fuse`d and it returns a completion from `poll`,
+    // /// then it will forever return `Poll::NotReady` from `poll` again (never
+    // /// resolve).  This, unlike the trait's `poll` method, is guaranteed.
+    // ///
+    // /// Additionally, once a future has completed, this `Fuse` combinator will
+    // /// ensure that all registered callbacks will not be registered with the
+    // /// underlying future.
+    // ///
+    // /// # Examples
+    // ///
+    // /// ```rust
+    // /// use futures::*;
+    // ///
+    // /// let mut task = Task::new();
+    // /// let mut future = finished::<i32, u32>(2);
+    // /// assert!(future.poll(&mut task).is_ready());
+    // ///
+    // /// // Normally, a call such as this would panic:
+    // /// //future.poll(&mut task);
+    // ///
+    // /// // This, however, is guaranteed to not panic
+    // /// let mut future = finished::<i32, u32>(2).fuse();
+    // /// assert!(future.poll(&mut task).is_ready());
+    // /// assert!(future.poll(&mut task).is_not_ready());
+    // /// ```
+    // fn fuse(self) -> Fuse<Self>
+    //     where Self: Sized
+    // {
+    //     let f = fuse::new(self);
+    //     assert_future::<Self::Item, Self::Error, _>(f)
+    // }
+    //
+    // /// Consume this future drive it to completion.
+    // ///
+    // /// This function is one of the primary methods of driving a future
+    // /// forward, and is also one of the primary sources of concurrency in event
+    // /// loops. This function will allocate a new `Task` to associate with this
+    // /// future, and the task will be paired with the future until it is
+    // /// completed.
+    // ///
+    // /// This method is also a convenient way of simply "spawning" a future into
+    // /// the background. For example this is similar to the `ensure` method in
+    // /// Python.
+    // ///
+    // /// # Bounds
+    // ///
+    // /// Note that this function requires the underlying future to be `Send`, but
+    // /// not all futures may implement the `Send` bound. Additionally, the
+    // /// underlying `Task` requires that the future is send to be driven to
+    // /// completion.
+    // ///
+    // /// If your type is not `Send`, however, fear not! Most event loops will
+    // /// provide an abstraction like `LoopData` in the `futures-mio` crate. This
+    // /// allows a future to be "pinned" to an event loop, allowing its handle to
+    // /// be `Send` while the underlying data itself is not `Send`.
+    // ///
+    // /// By using objects like `LoopData`, any future can become `Send` to use
+    // /// this method to drive it to completion.
+    // fn forget(self) where Self: Sized + Send + 'static {
+    //     forget::forget(self);
+    // }
 }
 
 /// A type alias for `Box<Future + Send>`
@@ -797,39 +799,39 @@ fn assert_future<A, B, F>(t: F) -> F
     t
 }
 
-/// Class of types which can be converted themselves into a future.
-///
-/// This trait is very similar to the `IntoIterator` trait and is intended to be
-/// used in a very similar fashion.
-pub trait IntoFuture {
-    /// The future that this type can be converted into.
-    type Future: Future<Item=Self::Item, Error=Self::Error>;
-
-    /// The item that the future may resolve with.
-    type Item;
-    /// The error that the future may resolve with.
-    type Error;
-
-    /// Consumes this object and produces a future.
-    fn into_future(self) -> Self::Future;
-}
-
-impl<F: Future> IntoFuture for F {
-    type Future = F;
-    type Item = F::Item;
-    type Error = F::Error;
-
-    fn into_future(self) -> F {
-        self
-    }
-}
-
-impl<T, E> IntoFuture for Result<T, E> {
-    type Future = Done<T, E>;
-    type Item = T;
-    type Error = E;
-
-    fn into_future(self) -> Done<T, E> {
-        done(self)
-    }
-}
+// /// Class of types which can be converted themselves into a future.
+// ///
+// /// This trait is very similar to the `IntoIterator` trait and is intended to be
+// /// used in a very similar fashion.
+// pub trait IntoFuture {
+//     /// The future that this type can be converted into.
+//     type Future: Future<Item=Self::Item, Error=Self::Error>;
+//
+//     /// The item that the future may resolve with.
+//     type Item;
+//     /// The error that the future may resolve with.
+//     type Error;
+//
+//     /// Consumes this object and produces a future.
+//     fn into_future(self) -> Self::Future;
+// }
+//
+// impl<F: Future> IntoFuture for F {
+//     type Future = F;
+//     type Item = F::Item;
+//     type Error = F::Error;
+//
+//     fn into_future(self) -> F {
+//         self
+//     }
+// }
+//
+// impl<T, E> IntoFuture for Result<T, E> {
+//     type Future = Done<T, E>;
+//     type Item = T;
+//     type Error = E;
+//
+//     fn into_future(self) -> Done<T, E> {
+//         done(self)
+//     }
+// }
